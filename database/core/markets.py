@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from functools import cached_property
 from enum import IntEnum
 
+
+# Cannot auto fetch this, the user will need to specify type
 class MarketType(IntEnum):
     EQUITIES = 1
     BONDS = 2
-    # NEED MORE IN FUTURE
+    # NEED MORE IN FUTURE Options, Forex
 
 # TODO: Wonder if I can reduce overhead through the creation of 1 database connection and caching for multiple query runs: FIXED???
 @dataclass

@@ -3,6 +3,7 @@ import sqlite3 as sql
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
 from functools import cached_property
+from typing_extensions import Literal
 
 
 @dataclass
@@ -19,11 +20,18 @@ class Exchange:
 
     # Ladder Down Properties
     @cached_property
-    def markets(self):
+    def all_markets(self):
         """Return all markets for this exchange."""
         from .markets import MarketRepository
         repo = MarketRepository(self.connection)
         return repo.get_by_exchange(self.id)
+    
+    @cached_property
+    def get_market(self, market_id: Literal[1, 2]):
+        """Return a specific market by name for this exchange."""
+        from .markets import MarketRepository
+        repo = MarketRepository(self.connection)
+        return repo.get_info(market_id=market_id, exchange_id=self.id)
 
     @cached_property
     def tickers(self):
@@ -31,6 +39,13 @@ class Exchange:
         from instruments.tickers import TickerRepository
         repo = TickerRepository(self.connection)
         return repo.get_by_exchange(self.id)
+    
+    @cached_property
+    def get_ticker(self, *, ticker_symbol: str = None, ticker_id: Optional[int] = None):
+        """Return a specific ticker by symbol or ID for this exchange."""
+        from instruments.tickers import TickerRepository
+        repo = TickerRepository(self.connection)
+        return repo.get_info(ticker_symbol=ticker_symbol, ticker_id=ticker_id, exchange_id=self.id)
 
 class ExchangeRepository:
     """
@@ -62,14 +77,14 @@ class ExchangeRepository:
 
     # ---------- READ ----------
 
-    def get_all(self) -> List[Tuple[int, str, str]]:
+    def get_all(self) -> List[Exchange]:
         """Return all exchanges as a list of (id, name, timezone)."""
         cur = self.connection.cursor()
         cur.execute("SELECT exchange_id, exchange_name, timezone FROM exchanges")
         rows = cur.fetchall()
         return [Exchange(*row, connection=self.connection) for row in rows]
 
-    def get_info(self, exchange_id: int | None = None, exchange_name: str | None = None) -> Exchange | None:
+    def get_info(self, *, exchange_id: int | None = None, exchange_name: str | None = None) -> Exchange | None:
         """Return a single exchange row or None if not found."""
         cur = self.connection.cursor()
         try:    

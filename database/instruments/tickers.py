@@ -3,6 +3,8 @@ import sqlite3 as sql
 from typing import Optional, List, Tuple, Any
 from dataclasses import dataclass
 from functools import cached_property
+import pandas as pd
+from typing_extensions import Literal
 
 @dataclass
 class Ticker:
@@ -39,9 +41,18 @@ class Ticker:
         repo = EquitiesRepository(self.connection)
         return repo.get_info(ticker_id=self.id, symbol=self.symbol)
 
+    # WAIT UNTIL I FINISH HISTORICAL PRICES REPOSITORY
+    @cached_property
+    def prices(self, start_date: str, end_date: str | None = None, period: Literal["5 Minutes", "1 Hour", "1 Day"] = "1 Day") -> pd.DataFrame:
+        """Return historical prices for this ticker."""
+        from database.technical_data.historical_prices import HistoricalPricesRepository
+        repo = HistoricalPricesRepository(self.connection)
+        return repo.get_info(self.id, period, start_date, end_date)
+
     # NEED BOND INFO LATER
     
 # This is the primary table for all instruments
+# TODO: Multiple of the same symbol can exist in the same exchange if they are different markets
 class TickerRepository:
     """
     Data-access layer for the `tickers` table.

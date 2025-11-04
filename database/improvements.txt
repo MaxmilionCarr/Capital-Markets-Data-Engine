@@ -8,3 +8,4 @@
 9.) Reduce overhead of creating new repo connections everytime data is called for in the data classes
 10.) REALLY NEED TO CLEAN THIS PART UP IT LOOKS LIKE SHIT
 11.) get_info functions should be able to fetch based on name not just id
+12.) Need to make a functional repository for updating database schemas

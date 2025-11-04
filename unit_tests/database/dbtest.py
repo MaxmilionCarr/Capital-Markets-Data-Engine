@@ -1,7 +1,7 @@
-from .database.basic import basic_tests
-from .database.exchanges import exchange_tests
-from .database.markets import market_tests
-from .database.tickers import ticker_tests
+from .repositories.database import basic_tests
+from .repositories.exchanges import exchange_tests
+from .repositories.markets import market_tests
+from .repositories.tickers import ticker_tests
 import argparse
 
 def main():

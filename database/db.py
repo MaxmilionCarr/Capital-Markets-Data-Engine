@@ -4,6 +4,8 @@ from .core.exchanges import ExchangeRepository
 from .core.markets import MarketRepository
 from .instruments.tickers import TickerRepository, EquitiesRepository
 import os
+from dataclasses import dataclass
+from functools import cached_property
 
 try:
     from dotenv import load_dotenv
@@ -14,6 +16,29 @@ try:
     env_path = os.getenv("DATABASE_PATH")
 except Exception as e:
     print("Not using environment variables, please configure your .env file.")
+
+@dataclass
+class Data:
+    db_path: str
+
+    @cached_property
+    def get_exchange(self, name: str):
+        db = DataBase(self.db_path)
+        return db.exchange_repo.get_info(exchange_name=name)
+    
+    # Do this when all is done, this will act as the top most data access layer
+    '''
+    @cached_property
+    def get_market(self, name: str, exchange_name: str = None):
+        db = DataBase(self.db_path)
+        return db.market_repo.get_info(market_name=name, exchange_name=exchange_name)
+
+    @cached_property
+    def get_ticker(self, symbol: str, ticker_name: str, exchange_name: str = None, market_id: int = None):
+        db = DataBase(self.db_path)
+        return db.ticker_repo.get_info(symbol=symbol, ticker_name=ticker_name, exchange_name=exchange_name, market_id=market_id)
+    '''
+
 
 class DataBase:
     def __init__(self, db_path=env_path):

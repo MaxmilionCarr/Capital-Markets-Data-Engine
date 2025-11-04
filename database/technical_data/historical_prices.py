@@ -4,28 +4,26 @@ from typing import Optional, List, Tuple, Any, Literal
 from datetime import datetime
 from dataclasses import dataclass
 from functools import cached_property
+import pandas as pd
+import numpy as np
 
 # TODO: Fix up repository with data classes and better methods for fetching
-
+# TODO: Make repo functions much better with period handling using years rather than specific dates
 periods = {
         "5 Minutes",
         "1 Hour",
         "1 Day"
     }
 
+# Possibly include this later, at the moment see no need as user will ask for price data like
+# ticker = db.get_ticker("AAPL")
+# prices = ticker.get_historical_prices(period="1 Day", start_date="2020-01-01", end_date="2023-01-01")
+'''
 @dataclass
 class HistoricalPrices:
     ticker_id: int
-    datetime: str
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: int
-    connection: sql.Connection
-
-    
-
+    df: pd.DataFrame = pd.DataFrame(columns=["datetime", "open", "high", "low", "close", "volume"])
+'''
 
 
 # Need to include option to fetch different periods, (5 min, 1 hour, 1 day)
@@ -50,15 +48,15 @@ class HistoricalPricesRepository:
     
     # ---------- READ ----------
 
-    def get_all(self) -> List[Tuple[Any, ...]]:
+    def get_all(self) -> pd.DataFrame:
         """
         Return all rows in table
         """
         cur = self.connection.cursor()
         cur.execute("SELECT * FROM historical_prices")
-        return cur.fetchall()
-    
-    def fetch_daily(self, ticker_id: int, start_date: datetime, end_date: datetime | None = None) -> List[Tuple[Any, ...]]:
+        return pd.DataFrame(cur.fetchall(), columns=[col[0] for col in cur.description]).drop(columns=['ticker_id'])
+
+    def _fetch_daily(self, ticker_id: int, start_date: datetime, end_date: datetime | None = None) -> pd.DataFrame:
         """
         Return all columns for a given ticker_id and datetime range with daily period.
         If end_date is None, return all data from start_date onwards.
@@ -66,17 +64,41 @@ class HistoricalPricesRepository:
         cur = self.connection.cursor()
         if end_date:
             cur.execute(
-                "SELECT * FROM historical_prices WHERE ticker_id = ? AND datetime BETWEEN ? AND ? ORDER BY datetime",
+                """
+                SELECT ticker_id, 
+                       date(datetime) AS day,
+                       FIRST_VALUE(open) OVER (PARTITION BY date(datetime) ORDER BY datetime) AS open,
+                       MAX(high) AS high,
+                       MIN(low) AS low,
+                       LAST_VALUE(close) OVER (PARTITION BY date(datetime) ORDER BY datetime ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS close,
+                       SUM(volume) AS volume
+                FROM historical_prices
+                WHERE ticker_id = ? AND datetime BETWEEN ? AND ?
+                GROUP BY day
+                ORDER BY day
+                """,
                 (ticker_id, start_date, end_date)
             )
         else:
             cur.execute(
-                "SELECT * FROM historical_prices WHERE ticker_id = ? AND datetime >= ? ORDER BY datetime",
+                """
+                SELECT ticker_id, 
+                       date(datetime) AS day,
+                       FIRST_VALUE(open) OVER (PARTITION BY date(datetime) ORDER BY datetime) AS open,
+                       MAX(high) AS high,
+                       MIN(low) AS low,
+                       LAST_VALUE(close) OVER (PARTITION BY date(datetime) ORDER BY datetime ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS close,
+                       SUM(volume) AS volume
+                FROM historical_prices
+                WHERE ticker_id = ? AND datetime >= ?
+                GROUP BY day
+                ORDER BY day
+                """,
                 (ticker_id, start_date)
             )
-        return cur.fetchall()
+        return pd.DataFrame(cur.fetchall(), columns=[col[0] for col in cur.description])
 
-    def fetch_hourly(self, ticker_id: int, start_date: datetime, end_date: datetime | None = None) -> List[Tuple[Any, ...]]:
+    def _fetch_hourly(self, ticker_id: int, start_date: datetime, end_date: datetime | None = None) -> pd.DataFrame:
         """
         Return all columns for a given ticker_id and datetime range with hourly period.
         If end_date is None, return all data from start_date onwards.
@@ -116,9 +138,9 @@ class HistoricalPricesRepository:
                 """,
                 (ticker_id, start_date)
             )
-        return cur.fetchall()
+        return pd.DataFrame(cur.fetchall(), columns=[col[0] for col in cur.description])
 
-    def fetch_five_minute(self, ticker_id: int, start_date: datetime, end_date: datetime | None = None) -> List[Tuple[Any, ...]]:
+    def _fetch_five_minute(self, ticker_id: int, start_date: datetime, end_date: datetime | None = None) -> pd.DataFrame:
         """
         Return all columns for a given ticker_id and datetime range with 5-minute period.
         If end_date is None, return all data from start_date onwards.
@@ -158,9 +180,9 @@ class HistoricalPricesRepository:
                 """,
                 (ticker_id, start_date)
             )
-        return cur.fetchall()
+        return pd.DataFrame(cur.fetchall(), columns=[col[0] for col in cur.description])
 
-    def get_info(self, ticker_id: int, period: Literal["5 Minutes", "1 Hour", "1 Day"], start_date: datetime, end_date: datetime | None = None) -> List[Tuple[Any, ...]]:
+    def get_info(self, ticker_id: int, period: Literal["5 Minutes", "1 Hour", "1 Day"], start_date: datetime, end_date: datetime | None = None) -> pd.DataFrame:
         """
         Return all columns for a given ticker_id and datetime range with a specified period.
         If end_date is None, return all data from start_date onwards.
@@ -168,34 +190,18 @@ class HistoricalPricesRepository:
         if period not in periods:
             raise ValueError("Period required")
 
+        prices = pd.DataFrame()
         match period:
             case "1 Day":
-                return self.fetch_daily(ticker_id, start_date, end_date)
+                prices = self._fetch_daily(ticker_id, start_date, end_date)
             case "1 Hour":
-                return self.fetch_hourly(ticker_id, start_date, end_date)
+                prices = self._fetch_hourly(ticker_id, start_date, end_date)
             case "5 Minutes":
-                return self.fetch_five_minute(ticker_id, start_date, end_date)
+                prices = self._fetch_five_minute(ticker_id, start_date, end_date)
             case _:
                 raise ValueError("Invalid period")
 
-    # Use fetch info and cut to get close prices rather than all info
-    def get_close_prices(self, ticker_id: int, start_date: datetime, end_date: datetime | None = None) -> List[Tuple[str, float]]:
-        """
-        Return list of (datetime, close) tuples for a given ticker_id and date range.
-        If end_date is None, return all data from start_date onwards.
-        """
-        cur = self.connection.cursor()
-        if end_date:
-            cur.execute(
-                "SELECT datetime, close FROM historical_prices WHERE ticker_id = ? AND datetime BETWEEN ? AND ? ORDER BY datetime",
-                (ticker_id, start_date, end_date)
-            )
-        else:
-            cur.execute(
-                "SELECT datetime, close FROM historical_prices WHERE ticker_id = ? AND datetime >= ? ORDER BY datetime",
-                (ticker_id, start_date)
-            )
-        return cur.fetchall()
+        return prices.drop(columns=['ticker_id'])
 
     # ---------- CREATE ----------
 
