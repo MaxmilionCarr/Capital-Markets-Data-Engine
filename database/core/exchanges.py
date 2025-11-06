@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing_extensions import Literal
 
-
 @dataclass
 class Exchange:
     """
@@ -13,39 +12,43 @@ class Exchange:
     """
     
     # Data Fields
-    id: int
+    _id: int
     name: str
     timezone: str
-    connection: sql.Connection
+    _connection: sql.Connection
 
-    # Ladder Down Properties
-    @cached_property
-    def all_markets(self):
+    # Fetch Markets
+    def get_all_markets(self):
         """Return all markets for this exchange."""
         from .markets import MarketRepository
-        repo = MarketRepository(self.connection)
-        return repo.get_by_exchange(self.id)
+        repo = MarketRepository(self._connection)
+        return repo.get_by_exchange(self._id)
     
-    @cached_property
-    def get_market(self, market_id: Literal[1, 2]):
+    def get_market(self, market_name: Literal["STK", "BND"]):
         """Return a specific market by name for this exchange."""
         from .markets import MarketRepository
-        repo = MarketRepository(self.connection)
-        return repo.get_info(market_id=market_id, exchange_id=self.id)
+        repo = MarketRepository(self._connection)
+        return repo.get_info(exchange_id=self._id, market_name=market_name)
 
-    @cached_property
-    def tickers(self):
+    # Fetch Tickers
+    def get_all_tickers(self):
         """Return all tickers for this exchange."""
         from instruments.tickers import TickerRepository
-        repo = TickerRepository(self.connection)
-        return repo.get_by_exchange(self.id)
+        repo = TickerRepository(self._connection)
+        return repo.get_by_exchange(self._id)
     
-    @cached_property
-    def get_ticker(self, *, ticker_symbol: str = None, ticker_id: Optional[int] = None):
+    # TODO: need to make it so that get_ticker is given by market as well
+    def get_ticker(self, ticker_symbol: str = None, *, market_name: Optional[Literal["STK", "BND"]] = None):
         """Return a specific ticker by symbol or ID for this exchange."""
         from instruments.tickers import TickerRepository
-        repo = TickerRepository(self.connection)
-        return repo.get_info(ticker_symbol=ticker_symbol, ticker_id=ticker_id, exchange_id=self.id)
+        repo = TickerRepository(self._connection)
+
+        if market_name is None: #GRAB TICKERS WITH THE SAME SYMBOL, EXCHANGE, DIFFERENT MARKETS
+            return repo.get_info_by_exchange(exchange_id=self._id, symbol=ticker_symbol)
+        
+        else:
+            market = self.get_market(market_name=market_name)
+            return market.get_ticker(ticker_symbol=ticker_symbol) if market else None
 
 class ExchangeRepository:
     """
@@ -55,19 +58,6 @@ class ExchangeRepository:
         exchange_id INTEGER PRIMARY KEY,
         exchange_name TEXT NOT NULL,
         timezone TEXT NOT NULL
-
-    Function Returns:
-        gets:
-            get_all() -> List[Tuple[int, str, str]]
-            get_at(exchange_id: int) -> Optional[Tuple[int, str, str]]
-        creates:
-            create(exchange_name: str, timezone: str) -> int
-            get_or_create(exchange_name: str, *, timezone: Optional[str] = None) -> int
-        updates:
-            update(exchange_id: int, *, exchange_name: Optional[str] = None, timezone: Optional[str] = None) -> int
-        deletes:
-            delete(*, exchange_id: Optional[int] = None, exchange_name: Optional[str] = None) -> int
-            delete_all() -> int
     """
 
     def __init__(self, connection: sql.Connection):
@@ -78,14 +68,15 @@ class ExchangeRepository:
     # ---------- READ ----------
 
     def get_all(self) -> List[Exchange]:
-        """Return all exchanges as a list of (id, name, timezone)."""
+        """Return all exchanges as a list of exchange objects"""
         cur = self.connection.cursor()
         cur.execute("SELECT exchange_id, exchange_name, timezone FROM exchanges")
         rows = cur.fetchall()
-        return [Exchange(*row, connection=self.connection) for row in rows]
-
+        return [Exchange(*row, _connection=self.connection) for row in rows]
+    
+    # Suggestion, is None really the best default return type here??. 
     def get_info(self, *, exchange_id: int | None = None, exchange_name: str | None = None) -> Exchange | None:
-        """Return a single exchange row or None if not found."""
+        """Return a single exchange object or None if not found."""
         cur = self.connection.cursor()
         try:    
             cur.execute(
@@ -96,7 +87,7 @@ class ExchangeRepository:
             print(f"SQL error: {e}")
             return None
         row = cur.fetchone()
-        return Exchange(*row, connection=self.connection) if row else None
+        return Exchange(*row, _connection=self.connection) if row else None
     
 
     # ---------- CREATE ----------

@@ -1,3 +1,5 @@
+# TODO: need a better name for this top level access. This is where users will get all their data from
+
 from __future__ import annotations
 import sqlite3 as sql
 from .core.exchanges import ExchangeRepository
@@ -21,24 +23,24 @@ except Exception as e:
 class Data:
     db_path: str
 
-    @cached_property
-    def get_exchange(self, name: str):
+    def get_exchange(self, exchange_name: str):
         db = DataBase(self.db_path)
-        return db.exchange_repo.get_info(exchange_name=name)
+        return db.exchange_repo.get_info(exchange_name=exchange_name)
     
-    # Do this when all is done, this will act as the top most data access layer
-    '''
-    @cached_property
-    def get_market(self, name: str, exchange_name: str = None):
+    def get_market(self, market_name: str, exchange_name: str):
         db = DataBase(self.db_path)
-        return db.market_repo.get_info(market_name=name, exchange_name=exchange_name)
-
-    @cached_property
-    def get_ticker(self, symbol: str, ticker_name: str, exchange_name: str = None, market_id: int = None):
+        exchange_id = db.exchange_repo.get_info(exchange_name=exchange_name)._id
+        return db.market_repo.get_info(exchange_id=exchange_id, market_name=market_name)
+    
+    def get_ticker(self, symbol: str, exchange_name: str, market_name: str):
         db = DataBase(self.db_path)
-        return db.ticker_repo.get_info(symbol=symbol, ticker_name=ticker_name, exchange_name=exchange_name, market_id=market_id)
-    '''
-
+        exchange = db.exchange_repo.get_info(exchange_name=exchange_name)
+        if not exchange:
+            return None
+        market = db.market_repo.get_info(exchange_id=exchange._id, market_name=market_name)
+        if not market:
+            return None
+        return market.get_ticker(ticker_symbol=symbol)
 
 class DataBase:
     def __init__(self, db_path=env_path):

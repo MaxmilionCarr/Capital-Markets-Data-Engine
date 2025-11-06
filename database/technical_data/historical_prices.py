@@ -9,6 +9,7 @@ import numpy as np
 
 # TODO: Fix up repository with data classes and better methods for fetching
 # TODO: Make repo functions much better with period handling using years rather than specific dates
+# TODO: Ticker needs to be unique to a market id and exchange id (IN CASES WHERE TWO EXCHANGES/MARKETS HAVE THE SAME TICKER SYMBOL i.e. "AAPL" -> STK, OPT)
 periods = {
         "5 Minutes",
         "1 Hour",

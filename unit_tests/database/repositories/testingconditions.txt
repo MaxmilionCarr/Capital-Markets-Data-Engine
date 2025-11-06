@@ -1,0 +1,36 @@
+RESPOSITORY UNIT TESTS
+
+Database
+- Deletes Database
+- Creates Database
+
+Exchanges 
+- Creates Exchanges (From CSV files + {"TEST_EXCHANGE", "TEST_TIMEZONE"})
+- Create Duplicate Record (Fails if two of the same are found)
+- Retrieves All Exchanges
+- Retrieves One Exchange (By name and exchange id)
+- Updates One Exchange ("TEST_EXCHANGE_UPDATED")
+- Deletes One Exchange
+
+Markets
+- Creates Markets (From CSV files + {"TEST_MARKET"})
+- Create Duplicate Record (Fails if two of the same are found)
+- Retrieves All Markets
+- Retrieves One Market
+- Updates One Market ("TEST_MARKET_UPDATED")
+- Deletes One Market
+
+Tickers
+- Creates Tickers (From CSV files + {symbol="TEST", market_id="1", exchange_id=db.exch_repo.get_info("TEST_EXCHANGE").id, currency="USD", full_name="TEST_TICKER", description="TEST TICKER", source="IBKR"})
+- Create Duplicate Record (Fails if two of the same are found)
+- Retrieves All Tickers
+- Retrieves One Ticker (By symbol, full_name and id)
+- Updates One Ticker (full_name="TEST_TICKER_UPDATED")
+- Deletes One Ticker
+
+Historical Prices
+- Creates Prices (From CSV files)
+- Create Duplicate Record (Fails if two of the same are found)
+- Retrieves Historical Data (By symbol and ID)
+- Updates One Ticker (full_name="TEST_TICKER_UPDATED")
+- Deletes One Ticker

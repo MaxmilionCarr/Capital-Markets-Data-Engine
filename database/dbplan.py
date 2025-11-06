@@ -1,6 +1,6 @@
 # Think about this one, but user should only be able to 
 # import the database object and from here start fetching
-from db import DataBase
+from database.db import DataBase
 
 db = DataBase()
 

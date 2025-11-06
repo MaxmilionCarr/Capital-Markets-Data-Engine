@@ -8,49 +8,68 @@ from typing_extensions import Literal
 
 @dataclass
 class Ticker:
-    id: int
+    _id: int
     symbol: str
-    market_id: int
-    exchange_id: int
+    _market_id: int
+    _exchange_id: int
     currency: str
     full_name: str
     description: str
-    source: str
-    connection: sql.Connection
-
+    _source: str
+    _connection: sql.Connection
+    
     @cached_property
-    def market(self):
-        """Return the market for this ticker."""
+    def market_name(self) -> str:
+        """Return the market name for this ticker."""
         from database.core.markets import MarketRepository
-        repo = MarketRepository(self.connection)
-        return repo.get_info(self.market_id, self.exchange_id)
-
+        repo = MarketRepository(self._connection)
+        market = repo.get_info(exchange_id=self._exchange_id, market_id=self._market_id)
+        return market.name if market else "Unknown"
+    
     @cached_property
-    def exchange(self):
+    def exchange_name(self) -> str:
+        """Return the exchange name for this ticker."""
+        from database.core.exchanges import ExchangeRepository
+        repo = ExchangeRepository(self._connection)
+        exchange = repo.get_info(exchange_id=self._exchange_id)
+        return exchange.name if exchange else "Unknown"
+
+    # Fetching Exchanges
+    def get_exchange(self):
         """Return the exchange for this ticker."""
         from database.core.exchanges import ExchangeRepository
-        repo = ExchangeRepository(self.connection)
-        return repo.get_info(self.exchange_id)
+        repo = ExchangeRepository(self._connection)
+        return repo.get_info(exchange_id=self._exchange_id)
+    
+    # Fetching Markets
+    def get_market(self):
+        """Return the market for this ticker."""
+        from database.core.markets import MarketRepository
+        repo = MarketRepository(self._connection)
+        return repo.get_info(exchange_id=self._exchange_id, market_id=self._market_id)
 
+    # Fetching Historical Prices
+    def get_prices(self, start_date: str, end_date: str | None = None, period: Literal["5 Minutes", "1 Hour", "1 Day"] = "1 Day") -> pd.DataFrame:
+        """Return historical prices for this ticker."""
+        from database.technical_data.historical_prices import HistoricalPricesRepository
+        repo = HistoricalPricesRepository(self._connection)
+        return repo.get_info(self._id, period, start_date, end_date)
+    
+    # TODO: Implement further methods that help for data fetch without knowing exact dates
+
+    # NEED BOND INFO LATER
+    '''
     @cached_property
     def equity_info(self) -> Equity | None:
         """Return equity-specific info if this ticker is an equity."""
         if self.market_id != 1:
             print("Ticker is not an equity based on market_id.")
             return None
-        repo = EquitiesRepository(self.connection)
+        repo = EquitiesRepository(self._connection)
         return repo.get_info(ticker_id=self.id, symbol=self.symbol)
-
-    # WAIT UNTIL I FINISH HISTORICAL PRICES REPOSITORY
-    @cached_property
-    def prices(self, start_date: str, end_date: str | None = None, period: Literal["5 Minutes", "1 Hour", "1 Day"] = "1 Day") -> pd.DataFrame:
-        """Return historical prices for this ticker."""
-        from database.technical_data.historical_prices import HistoricalPricesRepository
-        repo = HistoricalPricesRepository(self.connection)
-        return repo.get_info(self.id, period, start_date, end_date)
-
-    # NEED BOND INFO LATER
+    '''
     
+
 # This is the primary table for all instruments
 # TODO: Multiple of the same symbol can exist in the same exchange if they are different markets
 class TickerRepository:
@@ -83,10 +102,10 @@ class TickerRepository:
         cur = self.connection.cursor()
         cur.execute("SELECT ticker_id, symbol, market_id, exchange_id, currency, full_name, description, source FROM tickers")
         rows = cur.fetchall()
-        return [Ticker(*row, connection=self.connection) for row in rows]
+        return [Ticker(*row, _connection=self.connection) for row in rows]
 
-    # Can reduce the size of this (NEED TO)
-    def get_info(self, *, symbol: str | None = None, ticker_id: int | None = None) -> Ticker | None:
+    # TODO: need to make it so that get_info is based around a symbols exchange and market too
+    def get_info(self, exchange_id: int, market_id: int, *, symbol: str | None = None, ticker_id: int | None = None) -> Ticker | None:
         """
         Return a single row by primary key or None if not found.
         """
@@ -96,12 +115,12 @@ class TickerRepository:
         if ticker_id is not None:
             try:
                 cur.execute(
-                    f"SELECT ticker_id, symbol, market_id, exchange_id, currency, full_name, description, source FROM tickers WHERE ticker_id = ?",
-                    (ticker_id,),
+                    f"SELECT ticker_id, symbol, market_id, exchange_id, currency, full_name, description, source FROM tickers WHERE ticker_id = ? AND exchange_id = ? AND market_id = ?",
+                    (ticker_id, exchange_id, market_id),
                 )
                 row = cur.fetchone()
                 if row:
-                    return Ticker(*row, connection=self.connection)
+                    return Ticker(*row, _connection=self.connection)
             except sql.Error as e:
                 print(f"Error fetching ticker by ticker_id: {e}")
                 pass
@@ -109,17 +128,53 @@ class TickerRepository:
         if symbol is not None:
             try:
                 cur.execute(
-                    f"SELECT ticker_id, symbol, market_id, exchange_id, currency, full_name, description, source FROM tickers WHERE symbol = ?",
-                    (symbol,),
+                    f"SELECT ticker_id, symbol, market_id, exchange_id, currency, full_name, description, source FROM tickers WHERE symbol = ? AND exchange_id = ? AND market_id = ?",
+                    (symbol, exchange_id, market_id),
                 )
                 row = cur.fetchone()
                 if row:
-                    return Ticker(*row, connection=self.connection)
+                    return Ticker(*row, _connection=self.connection)
             except sql.Error as e:
                 print(f"Error fetching ticker by symbol: {e}")
                 pass
 
         return None
+    
+    def get_info_by_exchange(self, exchange_id: int, *, symbol: str | None = None, ticker_id: int | None = None) -> List[Ticker] | None:
+        """
+        Return rows by primary key and exchange or None if not found.
+        """
+        if symbol is None and ticker_id is None:
+            raise ValueError("Must provide symbol or ticker_id")
+        cur = self.connection.cursor()
+        if ticker_id is not None:
+            try:
+                cur.execute(
+                    f"SELECT ticker_id, symbol, market_id, exchange_id, currency, full_name, description, source FROM tickers WHERE ticker_id = ? AND exchange_id = ?",
+                    (ticker_id, exchange_id),
+                )
+                rows = cur.fetchall()
+                if rows:
+                    return [Ticker(*row, _connection=self.connection) for row in rows]
+            except sql.Error as e:
+                print(f"Error fetching ticker by ticker_id: {e}")
+                pass
+            
+        if symbol is not None:
+            try:
+                cur.execute(
+                    f"SELECT ticker_id, symbol, market_id, exchange_id, currency, full_name, description, source FROM tickers WHERE symbol = ? AND exchange_id = ?",
+                    (symbol, exchange_id),
+                )
+                rows = cur.fetchall()
+                if rows:
+                    return [Ticker(*row, _connection=self.connection) for row in rows]
+            except sql.Error as e:
+                print(f"Error fetching ticker by symbol: {e}")
+                pass
+
+        return None
+
     
     def get_by_market(self, market_id: int) -> List[Ticker]:
         """Return all tickers for a given market_id."""
@@ -129,7 +184,7 @@ class TickerRepository:
             (market_id,),
         )
         rows = cur.fetchall()
-        return [Ticker(*row, connection=self.connection) for row in rows]
+        return [Ticker(*row, _connection=self.connection) for row in rows]
     
     def get_by_exchange(self, exchange_id: int) -> List[Ticker]:
         """Return all tickers for a given exchange_id."""
@@ -139,7 +194,17 @@ class TickerRepository:
             (exchange_id,),
         )
         rows = cur.fetchall()
-        return [Ticker(*row, connection=self.connection) for row in rows]
+        return [Ticker(*row, _connection=self.connection) for row in rows]
+    
+    def get_by_market_and_exchange(self, market_id: int, exchange_id: int) -> List[Ticker]:
+        """Return all tickers for a given market_id and exchange_id."""
+        cur = self.connection.cursor()
+        cur.execute(
+            "SELECT ticker_id, symbol, market_id, exchange_id, currency, full_name, description, source FROM tickers WHERE market_id = ? AND exchange_id = ?",
+            (market_id, exchange_id),
+        )
+        rows = cur.fetchall()
+        return [Ticker(*row, _connection=self.connection) for row in rows]
     
     # ---------- CREATE ----------
 
@@ -153,8 +218,6 @@ class TickerRepository:
             (symbol, market_id, exchange_id, currency, full_name, description, source),
         )
         self.connection.commit()
-
-        # NEEDS TO BE BASED ON WHAT MARKET ID IS
 
         return cur.lastrowid  
 
@@ -251,7 +314,7 @@ class TickerRepository:
 
 # These tables provide definitions on the data availability for 
 # Different market types
-# NEEDS TO BE POPULATED ON TICKER CREATION BASED ON MARKET TYPE
+# TODO: NEEDS TO BE POPULATED ON TICKER CREATION BASED ON MARKET TYPE
 @dataclass
 class Equity:
     ticker_id: int

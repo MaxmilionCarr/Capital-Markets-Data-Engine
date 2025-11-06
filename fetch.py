@@ -42,3 +42,6 @@ if __name__ == "__main__":
 
     print(exch_repo.get_all())
     '''
+
+# TODO: Idea to fetch market data is when a user calls from a object, e.g. ticker.get_prices(), 
+# It will check if data exists using fetch function, if sql error then ib sync will fetch.
