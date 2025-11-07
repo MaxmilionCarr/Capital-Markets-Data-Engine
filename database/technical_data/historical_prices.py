@@ -40,6 +40,7 @@ class HistoricalPricesRepository:
         low REAL,
         close REAL NOT NULL,
         volume INTEGER,
+        PRIMARY KEY (ticker_id, datetime)
     """
     
     def __init__(self, connection: sql.Connection):

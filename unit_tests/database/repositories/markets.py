@@ -1,4 +1,5 @@
 from database.db import DataBase
+from .exchanges import create_test_exchange
 import sqlite3 as sql
 import os
 import pandas as pd
@@ -22,6 +23,15 @@ def fetch_exchange_id(exchange_name, path = test_env_path):
     else:
         raise ValueError(f"Exchange '{exchange_name}' not found.")
 
+def create_test_market():
+    market = MARKET
+    print("Creating test market...")
+    try:
+        market.create(fetch_exchange_id("TEST_EXCHANGE"), "TEST_MARKET")
+        print("Created market: TEST_MARKET")
+    except sql.IntegrityError:
+        print("Market already exists: TEST_MARKET")
+
 def create_markets():
     market = MARKET
     print("Creating markets...")
@@ -29,8 +39,6 @@ def create_markets():
         df = pd.read_csv(csv_path)
         markets = df[['stockType', 'contract.primaryExchange']]
         markets.columns = ['market_name', 'exchange_name']
-        markets = pd.concat([markets, pd.DataFrame({'market_name': ['TEST_MARKET'], 'exchange_name': ['TEST_EXCHANGE']})])
-        print(markets)
         for _, row in markets.drop_duplicates().iterrows():
             try:
                 market.create(fetch_exchange_id(row['exchange_name']), row['market_name'])
@@ -39,6 +47,8 @@ def create_markets():
                 print(f"Market already exists: {row['market_name']}")
     except Exception as e:
         print(f"Error: {e}")
+    
+    create_test_market()
 
 
 def create_duplicate_record():
@@ -63,42 +73,42 @@ def fetch_all_markets():
     try:
         all_markets = market.get_all()
         for market in all_markets:
-            print(f"Market ID: {market._id}, Name: {market.name}, Exchange ID: {market.exchange_id}")
+            print(f"Market ID: {market._id}, Name: {market.name}, Exchange ID: {market._exchange_id}")
     except Exception as e:
         print(f"Error: {e}")
 
-def fetch_single_market(market_name):
+def fetch_single_market(market_name, exchange_name=None):
     market = MARKET
     print(f"Fetching market: {market_name}...")
     try:
-        market = market.get_info(market_name=market_name)
-        if market:
-            print(f"Market ID: {market._id}, Name: {market.name}, Exchange ID: {market.exchange_id}")
+        market_info = market.get_info(exchange_id=fetch_exchange_id(exchange_name), market_name=market_name)
+        if market_info:
+            print(f"Market ID: {market_info._id}, Name: {market_info.name}, Exchange ID: {market_info._exchange_id}")
         else:
             print("Market not found.")
     except Exception as e:
         print(f"Error: {e}")
 
-def update_market(market_name, new_exchange_id):
+def update_market(exchange, prev_name, new_name):
     market = MARKET
-    print(f"Updating market: {market_name} to exchange ID {new_exchange_id}...")
+    print(f"Updating market: {prev_name} in exchange: {exchange} to {new_name}...")
     try:
-        market_info = market.get_info(market_name=market_name)
+        market_info = market.get_info(exchange_id=fetch_exchange_id(exchange), market_name=prev_name)
         if market_info:
-            market.update(exchange_id=market_info._exchange_id, market_id=market_info._id, market_name="UPDATED_MARKET")
+            market.update(exchange_id=market_info._exchange_id, market_id=market_info._id, market_name=new_name)
             print("Market updated successfully.")
         else:
             print("Market not found.")
     except Exception as e:
         print(f"Error: {e}")
 
-def delete_market(market_name):
+def delete_market(exchange, market_name):
     market = MARKET
     print(f"Deleting market: {market_name}...")
     try:
-        market = market.get_info(market_name=market_name)
-        if market:
-            market.delete(market_id=market._id)
+        market_info = market.get_info(exchange_id=fetch_exchange_id(exchange), market_name=market_name)
+        if market_info:
+            market.delete(exchange_id=market_info._exchange_id, market_id=market_info._id)
             print("Market deleted successfully.")
         else:
             print("Market not found.")
@@ -108,9 +118,10 @@ def delete_market(market_name):
 
         
 if __name__ == "__main__":
+    create_test_exchange()
     create_markets()
     create_duplicate_record()
     fetch_all_markets()
-    fetch_single_market("NASDAQ")
-    update_market("TEST_MARKET", "TEST_EXCHANGE")
-    delete_market("TEST_MARKET")
+    fetch_single_market("COMMON", "NASDAQ")
+    update_market("TEST_EXCHANGE", "TEST_MARKET", "UPDATED_TEST_MARKET")
+    delete_market("TEST_EXCHANGE", "UPDATED_TEST_MARKET")

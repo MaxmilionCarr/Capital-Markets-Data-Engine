@@ -1,10 +1,11 @@
 # TODO: need a better name for this top level access. This is where users will get all their data from
-
+# FIXME: need to handle connection closing better in handling duplicate creations
 from __future__ import annotations
 import sqlite3 as sql
 from .core.exchanges import ExchangeRepository
 from .core.markets import MarketRepository
 from .instruments.tickers import TickerRepository, EquitiesRepository
+from .technical_data.historical_prices import HistoricalPricesRepository
 import os
 from dataclasses import dataclass
 from functools import cached_property
@@ -43,6 +44,7 @@ class Data:
         return market.get_ticker(ticker_symbol=symbol)
 
 class DataBase:
+    # TODO: add flow down identifiers for exchange, market when creating tickers so don't have to ladder up
     def __init__(self, db_path=env_path):
         self.path = db_path
         self.connection = sql.connect(db_path)
@@ -51,6 +53,7 @@ class DataBase:
         self.market_repo = MarketRepository(self.connection)
         self.ticker_repo = TickerRepository(self.connection)
         self.equity_repo = EquitiesRepository(self.connection)
+        self.historical_price_repo = HistoricalPricesRepository(self.connection)
 
     def close(self):
         self.connection.close()

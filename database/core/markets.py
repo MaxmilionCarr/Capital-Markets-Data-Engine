@@ -11,7 +11,8 @@ MARKET_TYPES = {
     "COMMON": 1,
     "ETF": 2,
     "BND": 2,
-    "TEST_MARKET": 999
+    "TEST_MARKET": 999,
+    "UPDATED_TEST_MARKET": 999
 }
     
 @dataclass
@@ -44,13 +45,13 @@ class Market:
     # Fetching Tickers
     def get_all_tickers(self):
         """Return all tickers for this market."""
-        from instruments.tickers import TickerRepository
+        from database.instruments.tickers import TickerRepository
         repo = TickerRepository(self._connection)
         return repo.get_by_market_and_exchange(self._id, self._exchange_id)
     
     def get_ticker(self, ticker_symbol: str = None):
         """Return a specific ticker by symbol or name for this market."""
-        from instruments.tickers import TickerRepository
+        from database.instruments.tickers import TickerRepository
         repo = TickerRepository(self._connection)
         return repo.get_info(exchange_id=self._exchange_id, market_id=self._id, symbol=ticker_symbol)
 
@@ -133,12 +134,17 @@ class MarketRepository:
                 raise ValueError("Invalid market_name")
 
         cur = self.connection.cursor()
-        cur.execute(
-            "INSERT INTO markets (market_id, exchange_id, market_name) VALUES (?, ?, ?)",
-            (market_type, exchange_id, market_name),
-        )
-        self.connection.commit()
-        return cur.lastrowid
+        try:
+            cur.execute(
+                "INSERT INTO markets (market_id, exchange_id, market_name) VALUES (?, ?, ?)",
+                (market_type, exchange_id, market_name),
+            )
+            self.connection.commit()
+            return cur.lastrowid
+        except sql.Error as e:
+            print(f"SQL error: {e}")
+            cur.close()
+            return None
 
     # TODO: Modify to return object instead of just ID?
     def get_or_create(self, exchange_id: int, market_name: str | None = None) -> int:

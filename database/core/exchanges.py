@@ -96,14 +96,20 @@ class ExchangeRepository:
         """Insert a new exchange and return its ID."""
         if not exchange_name or not timezone:
             raise ValueError("exchange_name and timezone must be provided")
+        
         cur = self.connection.cursor()
-        cur.execute(
-            "INSERT INTO exchanges (exchange_name, timezone) VALUES (?, ?)",
-            (exchange_name, timezone),
-        )
-        self.connection.commit()
-        return cur.lastrowid
-
+        try:
+            cur.execute(
+                "INSERT INTO exchanges (exchange_name, timezone) VALUES (?, ?)",
+                (exchange_name, timezone),
+            )
+            self.connection.commit()
+            return cur.lastrowid
+        except sql.Error as e:
+            print(f"SQL error: {e}")
+            cur.close()
+        
+    # FIXME: USE CREATE INSTEAD OF REWRITING LOGIC
     def get_or_create(self, exchange_name: str, *, timezone: Optional[str] = None) -> int:
         """
         Return the ID of an existing exchange with this name,

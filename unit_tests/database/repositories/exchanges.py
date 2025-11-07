@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
+# TODO: Change these to use get_or_create, which will be the main way to handle duplicates from now on
 
 load_dotenv()
 test_env_path = os.getenv("TESTING_DATABASE_PATH")
@@ -13,6 +14,15 @@ EXCHANGE = DB.exchange_repo
 
 # NEED (EXCHANGE_NAME, EXCHANGE_TIMEZONE)
 
+def create_test_exchange():
+    exch = EXCHANGE
+    print("Creating test exchange...")
+    try:
+        exch.create("TEST_EXCHANGE", "TEST_TIMEZONE")
+        print("Created exchange: TEST_EXCHANGE")
+    except sql.IntegrityError:
+        print("Exchange already exists: TEST_EXCHANGE")
+
 def create_exchanges():
     exch = EXCHANGE
     print("Creating exchanges...")
@@ -20,7 +30,6 @@ def create_exchanges():
         df = pd.read_csv(csv_path)
         exchanges = df[['contract.primaryExchange', 'timeZoneId']]
         exchanges.columns = ['exchange_name', 'exchange_timezone']
-        exchanges = pd.concat([exchanges, pd.DataFrame({'exchange_name': ['TEST_EXCHANGE'], 'exchange_timezone': ['TEST_TIMEZONE']})])
         for _, row in exchanges.drop_duplicates().iterrows():
             try:
                 exch.create(row['exchange_name'], row['exchange_timezone'])
@@ -30,6 +39,7 @@ def create_exchanges():
     except Exception as e:
         print(f"Error: {e}")
 
+    create_test_exchange()
 
 def create_duplicate_record():
     exch = EXCHANGE
