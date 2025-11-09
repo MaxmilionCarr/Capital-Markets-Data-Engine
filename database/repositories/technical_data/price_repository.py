@@ -9,25 +9,13 @@ import numpy as np
 
 # TODO: Fix up repository with data classes and better methods for fetching
 # TODO: Make repo functions much better with period handling using years rather than specific dates
-# TODO: Ticker needs to be unique to a market id and exchange id (IN CASES WHERE TWO EXCHANGES/MARKETS HAVE THE SAME TICKER SYMBOL i.e. "AAPL" -> STK, OPT)
 periods = {
         "5 Minutes",
         "1 Hour",
         "1 Day"
     }
 
-# Possibly include this later, at the moment see no need as user will ask for price data like
-# ticker = db.get_ticker("AAPL")
-# prices = ticker.get_historical_prices(period="1 Day", start_date="2020-01-01", end_date="2023-01-01")
-'''
-@dataclass
-class HistoricalPrices:
-    ticker_id: int
-    df: pd.DataFrame = pd.DataFrame(columns=["datetime", "open", "high", "low", "close", "volume"])
-'''
 
-
-# Need to include option to fetch different periods, (5 min, 1 hour, 1 day)
 class HistoricalPricesRepository:
     """
     Data-access layer for the `historical_prices` table.
@@ -68,7 +56,7 @@ class HistoricalPricesRepository:
             cur.execute(
                 """
                 SELECT ticker_id, 
-                       date(datetime) AS day,
+                       date(datetime) AS date,
                        FIRST_VALUE(open) OVER (PARTITION BY date(datetime) ORDER BY datetime) AS open,
                        MAX(high) AS high,
                        MIN(low) AS low,
@@ -76,8 +64,8 @@ class HistoricalPricesRepository:
                        SUM(volume) AS volume
                 FROM historical_prices
                 WHERE ticker_id = ? AND datetime BETWEEN ? AND ?
-                GROUP BY day
-                ORDER BY day
+                GROUP BY date
+                ORDER BY date
                 """,
                 (ticker_id, start_date, end_date)
             )
@@ -85,7 +73,7 @@ class HistoricalPricesRepository:
             cur.execute(
                 """
                 SELECT ticker_id, 
-                       date(datetime) AS day,
+                       date(datetime) AS date,
                        FIRST_VALUE(open) OVER (PARTITION BY date(datetime) ORDER BY datetime) AS open,
                        MAX(high) AS high,
                        MIN(low) AS low,
@@ -93,8 +81,8 @@ class HistoricalPricesRepository:
                        SUM(volume) AS volume
                 FROM historical_prices
                 WHERE ticker_id = ? AND datetime >= ?
-                GROUP BY day
-                ORDER BY day
+                GROUP BY date
+                ORDER BY date
                 """,
                 (ticker_id, start_date)
             )
@@ -110,7 +98,7 @@ class HistoricalPricesRepository:
             cur.execute(
                 """
                 SELECT ticker_id, 
-                       strftime('%Y-%m-%d %H:00:00', datetime) AS hour,
+                       strftime('%Y-%m-%d %H:00:00', datetime) AS date,
                        FIRST_VALUE(open) OVER (PARTITION BY strftime('%Y-%m-%d %H', datetime) ORDER BY datetime) AS open,
                        MAX(high) AS high,
                        MIN(low) AS low,
@@ -118,8 +106,8 @@ class HistoricalPricesRepository:
                        SUM(volume) AS volume
                 FROM historical_prices
                 WHERE ticker_id = ? AND datetime BETWEEN ? AND ?
-                GROUP BY hour
-                ORDER BY hour
+                GROUP BY date
+                ORDER BY date
                 """,
                 (ticker_id, start_date, end_date)
             )
@@ -127,7 +115,7 @@ class HistoricalPricesRepository:
             cur.execute(
                 """
                 SELECT ticker_id, 
-                       strftime('%Y-%m-%d %H:00:00', datetime) AS hour,
+                       strftime('%Y-%m-%d %H:00:00', datetime) AS date,
                        FIRST_VALUE(open) OVER (PARTITION BY strftime('%Y-%m-%d %H', datetime) ORDER BY datetime) AS open,
                        MAX(high) AS high,
                        MIN(low) AS low,
@@ -135,8 +123,8 @@ class HistoricalPricesRepository:
                        SUM(volume) AS volume
                 FROM historical_prices
                 WHERE ticker_id = ? AND datetime >= ?
-                GROUP BY hour
-                ORDER BY hour
+                GROUP BY date
+                ORDER BY date
                 """,
                 (ticker_id, start_date)
             )
@@ -152,7 +140,7 @@ class HistoricalPricesRepository:
             cur.execute(
                 """
                 SELECT ticker_id, 
-                       strftime('%Y-%m-%d %H:%M:00', datetime, '-' || (strftime('%M', datetime) % 5) || ' minutes') AS five_minute,
+                       strftime('%Y-%m-%d %H:%M:00', datetime, '-' || (strftime('%M', datetime) % 5) || ' minutes') AS date,
                        FIRST_VALUE(open) OVER (PARTITION BY strftime('%Y-%m-%d %H:%M', datetime, '-' || (strftime('%M', datetime) % 5) || ' minutes') ORDER BY datetime) AS open,
                        MAX(high) AS high,
                        MIN(low) AS low,
@@ -160,8 +148,8 @@ class HistoricalPricesRepository:
                        SUM(volume) AS volume
                 FROM historical_prices
                 WHERE ticker_id = ? AND datetime BETWEEN ? AND ?
-                GROUP BY five_minute
-                ORDER BY five_minute
+                GROUP BY date
+                ORDER BY date
                 """,
                 (ticker_id, start_date, end_date)
             )
@@ -169,7 +157,7 @@ class HistoricalPricesRepository:
             cur.execute(
                 """
                 SELECT ticker_id, 
-                       strftime('%Y-%m-%d %H:%M:00', datetime, '-' || (strftime('%M', datetime) % 5) || ' minutes') AS five_minute,
+                       strftime('%Y-%m-%d %H:%M:00', datetime, '-' || (strftime('%M', datetime) % 5) || ' minutes') AS date,
                        FIRST_VALUE(open) OVER (PARTITION BY strftime('%Y-%m-%d %H:%M', datetime, '-' || (strftime('%M', datetime) % 5) || ' minutes') ORDER BY datetime) AS open,
                        MAX(high) AS high,
                        MIN(low) AS low,
@@ -177,8 +165,8 @@ class HistoricalPricesRepository:
                        SUM(volume) AS volume
                 FROM historical_prices
                 WHERE ticker_id = ? AND datetime >= ?
-                GROUP BY five_minute
-                ORDER BY five_minute
+                GROUP BY date
+                ORDER BY date
                 """,
                 (ticker_id, start_date)
             )
@@ -207,6 +195,7 @@ class HistoricalPricesRepository:
 
     # ---------- CREATE ----------
 
+    # Make all parameters required, IBKR data should have all fields
     def create(self, ticker_id: int, datetime: datetime, close: float, *, open: float, high: float, low: float, volume: int) -> int:
         """
         Insert a new row and return its primary key.
@@ -218,21 +207,18 @@ class HistoricalPricesRepository:
             "INSERT INTO historical_prices (ticker_id, datetime, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (ticker_id, datetime, open, high, low, close, volume)
         )
+        self.connection.commit()
         return cur.lastrowid
 
-    # Wonder how i can implement this for historical prices?
+    # TODO: Wonder how i can implement this for historical prices?
     '''
     def get_or_create(self, ticker_id: int, datetime: str, *, open: float, high: float, low: float, close: float, volume: int) -> int:
         """
         Return the primary key of an existing row with this ticker_id and datetime,
         or create it if it doesn't exist.
         """
-        cur = self.connection.cursor()
-        cur.execute(
-            "SELECT rowid FROM historical_prices WHERE ticker_id = ? AND datetime = ?",
-            (ticker_id, datetime)
-        )
-        row = cur.fetchone()
+        
+        return self.get_infos
         if row:
             return row[0]
         else:

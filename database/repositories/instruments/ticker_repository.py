@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime
 import sqlite3 as sql
 from typing import Optional, List, Tuple, Any
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ class Ticker:
     @cached_property
     def market_name(self) -> str:
         """Return the market name for this ticker."""
-        from database.core.markets import MarketRepository
+        from database.repositories.core.market_repository import MarketRepository
         repo = MarketRepository(self._connection)
         market = repo.get_info(exchange_id=self._exchange_id, market_id=self._market_id)
         return market.name if market else "Unknown"
@@ -29,7 +30,7 @@ class Ticker:
     @cached_property
     def exchange_name(self) -> str:
         """Return the exchange name for this ticker."""
-        from database.core.exchanges import ExchangeRepository
+        from database.repositories.core.exchange_repository import ExchangeRepository
         repo = ExchangeRepository(self._connection)
         exchange = repo.get_info(exchange_id=self._exchange_id)
         return exchange.name if exchange else "Unknown"
@@ -37,21 +38,21 @@ class Ticker:
     # Fetching Exchanges
     def get_exchange(self):
         """Return the exchange for this ticker."""
-        from database.core.exchanges import ExchangeRepository
+        from database.repositories.core.exchange_repository import ExchangeRepository
         repo = ExchangeRepository(self._connection)
         return repo.get_info(exchange_id=self._exchange_id)
     
     # Fetching Markets
     def get_market(self):
         """Return the market for this ticker."""
-        from database.core.markets import MarketRepository
+        from database.repositories.core.market_repository import MarketRepository
         repo = MarketRepository(self._connection)
         return repo.get_info(exchange_id=self._exchange_id, market_id=self._market_id)
 
     # Fetching Historical Prices
-    def get_prices(self, start_date: str, end_date: str | None = None, period: Literal["5 Minutes", "1 Hour", "1 Day"] = "1 Day") -> pd.DataFrame:
+    def get_prices(self, start_date: datetime, end_date: datetime | None = None, *, period: Literal["5 Minutes", "1 Hour", "1 Day"] = "1 Day") -> pd.DataFrame:
         """Return historical prices for this ticker."""
-        from database.technical_data.historical_prices import HistoricalPricesRepository
+        from database.repositories.technical_data.price_repository import HistoricalPricesRepository
         repo = HistoricalPricesRepository(self._connection)
         return repo.get_info(self._id, period, start_date, end_date)
     
@@ -105,13 +106,17 @@ class TickerRepository:
         return [Ticker(*row, _connection=self.connection) for row in rows]
 
     # TODO: need to make it so that get_info is based around a symbols exchange and market too
-    def get_info(self, exchange_id: int, market_id: int, *, symbol: str | None = None, ticker_id: int | None = None) -> Ticker | None:
+    def get_info(self, exchange_id: int, market_id: int, *, symbol: str | None = None, ticker_id: int | None = None) -> Ticker:
         """
         Return a single row by primary key or None if not found.
         """
+
         if symbol is None and ticker_id is None:
             raise ValueError("Must provide symbol or ticker_id")
+        
         cur = self.connection.cursor()
+
+        # If both provided, prefer ticker_id
         if ticker_id is not None:
             try:
                 cur.execute(
@@ -138,8 +143,9 @@ class TickerRepository:
                 print(f"Error fetching ticker by symbol: {e}")
                 pass
 
-        return None
+        raise sql.Error
     
+    # FIXME: Should make any errors return as errors not None
     def get_info_by_exchange(self, exchange_id: int, *, symbol: str | None = None, ticker_id: int | None = None) -> List[Ticker] | None:
         """
         Return rows by primary key and exchange or None if not found.
@@ -213,35 +219,31 @@ class TickerRepository:
         Insert a new ticker and return its ID.
         """
         cur = self.connection.cursor()
-        cur.execute(
-            f"INSERT INTO tickers (symbol, market_id, exchange_id, currency, full_name, description, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (symbol, market_id, exchange_id, currency, full_name, description, source),
-        )
-        self.connection.commit()
+        try:
+            cur.execute(
+                f"INSERT INTO tickers (symbol, market_id, exchange_id, currency, full_name, description, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (symbol, market_id, exchange_id, currency, full_name, description, source),
+            )
+            self.connection.commit()
+        except sql.Error as e:
+            print(f"SQL error: {e}")
+            cur.close()
+            raise e
 
-        return cur.lastrowid  
-
-
+    # TODO: Use create and get_info instead of rewriting logic
     def get_or_create(self, symbol: str, market_id: int, exchange_id: int, *, currency: str, full_name: str | None = None, description: str | None = None, source: str) -> int:
         """
         Return the ID of a row where unique_col == unique_val,
         or create it using defaults if it doesn't exist.
         """
-        cur = self.connection.cursor()
-        cur.execute(
-            f"SELECT ticker_id FROM tickers WHERE symbol = ? AND market_id = ? AND exchange_id = ?",
-            (symbol, market_id, exchange_id),
-        )
-        row = cur.fetchone()
-        if row:
-            return row[0]
+        
+        try:
+            return self.get_info(exchange_id=exchange_id, market_id=market_id, symbol=symbol)._id
+        except sql.Error:
+            print(f"Ticker {symbol} not found in exchange {exchange_id} and market {market_id}.")
+            pass
 
-        cur.execute(
-            f"INSERT INTO tickers (symbol, market_id, exchange_id, currency, full_name, description, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (symbol, market_id, exchange_id, currency, full_name or "", description or "", source),
-        )
-        self.connection.commit()
-        return cur.lastrowid
+        return self.create(symbol=symbol, market_id=market_id, exchange_id=exchange_id, currency=currency, full_name=full_name, description=description, source=source)
 
     # ---------- UPDATE ----------
 

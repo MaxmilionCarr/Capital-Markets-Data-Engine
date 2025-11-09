@@ -2,10 +2,10 @@
 # FIXME: need to handle connection closing better in handling duplicate creations
 from __future__ import annotations
 import sqlite3 as sql
-from .core.exchanges import ExchangeRepository
-from .core.markets import MarketRepository
-from .instruments.tickers import TickerRepository, EquitiesRepository
-from .technical_data.historical_prices import HistoricalPricesRepository
+from .repositories.core.exchange_repository import ExchangeRepository
+from .repositories.core.market_repository import MarketRepository
+from .repositories.instruments.ticker_repository import TickerRepository, EquitiesRepository
+from .repositories.technical_data.price_repository import HistoricalPricesRepository
 import os
 from dataclasses import dataclass
 from functools import cached_property

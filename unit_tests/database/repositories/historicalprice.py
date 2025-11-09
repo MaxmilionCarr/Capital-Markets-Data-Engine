@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 load_dotenv()
 test_env_path = os.getenv("TESTING_DATABASE_PATH")
@@ -39,7 +40,7 @@ def create_prices():
                                          high=row['high'],
                                          low=row['low'],
                                          volume=row['volume'])
-                print(f"Created historical prices for ticker: {TICKER.symbol} at {row['datetime']}")
+                print(f"Created historical prices for ticker: {TICKER.symbol}, {TICKER._id} at {row['datetime']}")
             except sql.IntegrityError:
                 print(f"Historical price already exists for ticker: {TICKER.symbol} at {row['datetime']}")
     except Exception as e:
@@ -49,8 +50,10 @@ def fetch_all_prices():
     historical_prices = DB.historical_price_repo
     print("Fetching historical prices...")
     try:
+        print(TICKER._id)
         prices = historical_prices.get_info(ticker_id=TICKER._id, period='5 Minutes', start_date=datetime(2022,1,3))
         print(prices)
+        return prices
     except Exception as e:
         print(f"Error: {e}")
 
@@ -62,8 +65,16 @@ def delete_all_prices():
     except Exception as e:
         print(f"Error: {e}")
 
+def create_time_series(df: pd.DataFrame):
+    print("Creating time series historical prices...")
+
+    plt.plot(df['five_minute'], df['close'], label='Close Prices of AAPL')
+    plt.ylabel('Price')
+    plt.title('Historical Prices')
+    plt.legend()
+    plt.show()
+
         
 if __name__ == "__main__":
     create_prices()
-    fetch_all_prices()
-    delete_all_prices()
+    df =fetch_all_prices()

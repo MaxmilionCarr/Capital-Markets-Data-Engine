@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing_extensions import Literal
 
+#TODO: Double check if i need to close self.connection cursors after use?
 @dataclass
 class Exchange:
     """
@@ -20,27 +21,26 @@ class Exchange:
     # Fetch Markets
     def get_all_markets(self):
         """Return all markets for this exchange."""
-        from .markets import MarketRepository
+        from .market_repository import MarketRepository
         repo = MarketRepository(self._connection)
         return repo.get_by_exchange(self._id)
     
-    def get_market(self, market_name: Literal["STK", "BND"]):
+    def get_market(self, market_name: Literal["COMMON"]):
         """Return a specific market by name for this exchange."""
-        from .markets import MarketRepository
+        from .market_repository import MarketRepository
         repo = MarketRepository(self._connection)
         return repo.get_info(exchange_id=self._id, market_name=market_name)
 
     # Fetch Tickers
     def get_all_tickers(self):
         """Return all tickers for this exchange."""
-        from instruments.tickers import TickerRepository
+        from database.repositories.instruments.ticker_repository import TickerRepository
         repo = TickerRepository(self._connection)
         return repo.get_by_exchange(self._id)
     
-    # TODO: need to make it so that get_ticker is given by market as well
-    def get_ticker(self, ticker_symbol: str = None, *, market_name: Optional[Literal["STK", "BND"]] = None):
+    def get_ticker(self, ticker_symbol: str = None, *, market_name: Optional[Literal["COMMON"]] = None):
         """Return a specific ticker by symbol or ID for this exchange."""
-        from instruments.tickers import TickerRepository
+        from database.repositories.instruments.ticker_repository import TickerRepository
         repo = TickerRepository(self._connection)
 
         if market_name is None: #GRAB TICKERS WITH THE SAME SYMBOL, EXCHANGE, DIFFERENT MARKETS
@@ -74,9 +74,11 @@ class ExchangeRepository:
         rows = cur.fetchall()
         return [Exchange(*row, _connection=self.connection) for row in rows]
     
-    # Suggestion, is None really the best default return type here??. 
-    def get_info(self, *, exchange_id: int | None = None, exchange_name: str | None = None) -> Exchange | None:
+    def get_info(self, *, exchange_id: int | None = None, exchange_name: str | None = None) -> Exchange:
         """Return a single exchange object or None if not found."""
+        if (exchange_id is None) == (exchange_name is None):
+            raise ValueError("Provide exactly one of exchange_id or exchange_name")
+
         cur = self.connection.cursor()
         try:    
             cur.execute(
@@ -85,9 +87,12 @@ class ExchangeRepository:
             )
         except sql.Error as e:
             print(f"SQL error: {e}")
-            return None
+            raise e
         row = cur.fetchone()
-        return Exchange(*row, _connection=self.connection) if row else None
+        if row is None:
+            raise sql.Error("No exchange found with the given identifier.") #FIXME: Change this to a custom error in future?
+
+        return Exchange(*row, _connection=self.connection)
     
 
     # ---------- CREATE ----------
@@ -108,8 +113,8 @@ class ExchangeRepository:
         except sql.Error as e:
             print(f"SQL error: {e}")
             cur.close()
+            raise e
         
-    # FIXME: USE CREATE INSTEAD OF REWRITING LOGIC
     def get_or_create(self, exchange_name: str, *, timezone: Optional[str] = None) -> int:
         """
         Return the ID of an existing exchange with this name,
@@ -117,24 +122,17 @@ class ExchangeRepository:
         """
         if not exchange_name:
             raise ValueError("exchange_name must be provided")
-        cur = self.connection.cursor()
-        cur.execute(
-            "SELECT exchange_id FROM exchanges WHERE exchange_name = ?",
-            (exchange_name,),
-        )
-        row = cur.fetchone()
-        if row:
-            return row[0]
+        
+        try:
+            return self.get_info(exchange_name=exchange_name)._id
+        except sql.Error:
+            print(f"Exchange {exchange_name} not found.")
+            pass
 
         if timezone is None:
             raise ValueError("timezone must be provided when creating a new exchange")
 
-        cur.execute(
-            "INSERT INTO exchanges (exchange_name, timezone) VALUES (?, ?)",
-            (exchange_name, timezone),
-        )
-        self.connection.commit()
-        return cur.lastrowid
+        return self.create(exchange_name=exchange_name, timezone=timezone)
 
     # ---------- UPDATE ----------
 

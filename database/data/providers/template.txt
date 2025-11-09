@@ -1,0 +1,12 @@
+class IBKRClient:
+    def get_exchange_details(self, name):
+    def get_tickers(self, exchange_name, market_name)
+    def get_prices(self, ticker, start, end, etc)
+
+class IBKRDataProvider(DataProvider[IBKRClient]):
+    def __init__(self, client: IBKRClient):
+        self.client = client
+    
+    def fetch_exchange(self)
+
+TODO: IBKR client functions, same as services just specific to the client

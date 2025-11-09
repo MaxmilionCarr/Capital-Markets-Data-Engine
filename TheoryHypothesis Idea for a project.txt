@@ -1,0 +1,9 @@
+Theory/Hypothesis Idea for a project using my integration
+
+Has news/headlines effect on instruments increased in recent greater access to the stock market for retail investors. In addition, is it possible to build a reliable trading strategy (short or long term) based on sentiment gathered from these headlines
+
+should use decision tree with knn to build a classification model based on these features
+
+news headline, news text, change in trade volume ratio, movement short term (target)
+
+could branch into calculating the magnitude of effect (Large effect, Small effect) and direction (4 classifications)
