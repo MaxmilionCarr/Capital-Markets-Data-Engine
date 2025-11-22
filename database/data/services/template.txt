@@ -4,9 +4,13 @@ class [Name]Service:
         self.repo = [name] repo
         self.provider = provider
     
-    def get_or_create(self, exchange_name: str)
+    def get_and_create(self, exchange_name: str)
 
     def get_
 
 TODO: Service should focus on fetching data for input by the repository functions
 TODO: Service should also be a template function based on the users given data provider. I will do integrations in future for news and shit
+
+NOTE
+The service should not fetch only, it needs to check that what the user is requesting exists on the service then create and use data access repository to push 
+to the database
