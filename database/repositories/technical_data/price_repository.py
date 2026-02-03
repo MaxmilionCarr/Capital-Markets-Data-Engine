@@ -367,6 +367,36 @@ class EquityPricesRepository:
                 rth_close=rth_close
             )
             _insert_all(df)
+        def _clip_window_to_rth_per_day(
+            s: datetime,
+            e: datetime,
+            rth_open: time,
+            rth_close: time,
+        ) -> list[tuple[datetime, datetime]]:
+            """
+            Returns 0+ sub-windows of [s,e] clipped to RTH for each day.
+            If a day is fully outside RTH, it yields nothing for that day.
+            """
+            if e <= s:
+                return []
+
+            out: list[tuple[datetime, datetime]] = []
+            day = s.replace(hour=0, minute=0, second=0, microsecond=0)
+            last = e.replace(hour=0, minute=0, second=0, microsecond=0)
+
+            while day <= last:
+                d_open = day.replace(hour=rth_open.hour, minute=rth_open.minute, second=0, microsecond=0)
+                d_close = day.replace(hour=rth_close.hour, minute=rth_close.minute, second=0, microsecond=0)
+
+                ss = max(s, d_open)
+                ee = min(e, d_close)
+
+                if ss < ee:
+                    out.append((ss, ee))
+
+                day += timedelta(days=1)
+
+            return out
 
         # --- 1) Read what we already have ---
         existing = self.get_prices(equity, period, start_date, end_date)
@@ -432,17 +462,31 @@ class EquityPricesRepository:
 
         # --- 4) Fetch + insert ---
         ex = equity._ticker.get_exchange()
-        rth_open = _parse_hms(ex.rth_open) if ex and ex.rth_open else None
-        rth_close = _parse_hms(ex.rth_close) if ex and ex.rth_close else None
+
+        # never allow None
+        rth_open = _parse_hms(ex.rth_open) if ex and getattr(ex, "rth_open", None) else time(9, 30)
+        rth_close = _parse_hms(ex.rth_close) if ex and getattr(ex, "rth_close", None) else time(16, 0)
+
         for s, e in merged:
-            print(s, e)
 
             if e <= s:
                 continue
-            
-            _fetch_and_insert(s, e)
 
-        return self.get_prices(equity, period, start_date, end_date)
+            # IMPORTANT: clip first
+            slices = _clip_window_to_rth_per_day(s, e, rth_open, rth_close)
+
+            # If no overlap with RTH anywhere, do not call IBKR
+            if not slices:
+                continue
+
+            # Call only for the clipped slices
+            for ss, ee in slices:
+                print("CLIPPED FETCH:", ss, ee)
+                
+                _fetch_and_insert(ss, ee)
+
+
+            return self.get_prices(equity, period, start_date, end_date)
 
 
     # ---------- UPDATE ----------

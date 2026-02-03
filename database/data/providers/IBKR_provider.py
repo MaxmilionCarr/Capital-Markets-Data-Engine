@@ -352,6 +352,7 @@ class IBKRProvider(MarketDataProvider):
             intended_end = cur_end
 
             # If intraday, clip each *day* separately to avoid fetching the overnight gap.
+            # TODO: MAKE THIS WORK FASTER BY NOT CLIPPING EVERY DAY, WE KNOW HOW LONG EACH DAY LASTS SO WHY NOT JUST ACCOUNT FOR WEEKENDS AND FETCH DATA
             if bar_size in ("1 hour", "30 mins", "5 mins"):
                 day = intended_start.replace(hour=0, minute=0, second=0, microsecond=0)
                 last_day = intended_end.replace(hour=0, minute=0, second=0, microsecond=0)

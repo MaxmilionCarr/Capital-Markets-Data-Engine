@@ -24,7 +24,6 @@ class IBKRService:
         return info
     
     def fetch_equity_prices(self, symbol: str, exchange_name: str, start_date: datetime, end_date: datetime = None, bar_size: Literal["5 mins", "1 hour", "1 day"] = "1 day", rth_open: time = None, rth_close: time = None) -> pd.DataFrame:
-        print("Fetching equity prices from IBKR...")
         self._client.connect()
         df = self._client.get_equity_prices(symbol, exchange_name, start_date, end_date, bar_size, rth_open=rth_open, rth_close=rth_close)
         self._client.disconnect()

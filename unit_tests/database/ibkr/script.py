@@ -19,7 +19,7 @@ def main():
     db = DB(db_path = test_env_path, _config = config)
     db._hub.service
     
-    ticker = db.get_ticker("CBA", "ASX", ensure=True)
+    ticker = db.get_ticker("NVDA", "NASDAQ", ensure=True)
     print(ticker)
     
     exchange = ticker.get_exchange()
