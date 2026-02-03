@@ -11,6 +11,48 @@ from .base import MarketDataProvider, Provider, TickerInfo, BondInfo, EquityInfo
 
 
 # ---------------- helpers ----------------
+from datetime import time
+
+def _hhmm_to_hms(hhmm: str) -> str:
+    # "0930" -> "09:30:00"
+    hhmm = hhmm.strip()
+    return f"{hhmm[:2]}:{hhmm[2:4]}:00"
+
+def _extract_first_session(hours: str) -> tuple[str | None, str | None]:
+    """
+    Parse IBKR tradingHours/liquidHours:
+      "YYYYMMDD:HHMM-YYYYMMDD:HHMM;YYYYMMDD:CLOSED;..."
+    Return first non-CLOSED (open_hms, close_hms).
+    """
+    if not hours:
+        return None, None
+
+    for seg in hours.split(";"):
+        if not seg:
+            continue
+        day, rhs = seg.split(":", 1)
+        if rhs == "CLOSED":
+            continue
+
+        start_s, end_s = rhs.split("-", 1)
+
+        # normalize "YYYYMMDD:HHMM" -> "HHMM"
+        if ":" in start_s:
+            start_s = start_s.split(":", 1)[1]
+        if ":" in end_s:
+            end_s = end_s.split(":", 1)[1]
+
+        # sometimes IBKR can give "HHMM-HHMM,HHMM-HHMM" (multiple sessions)
+        # take first session only
+        if "," in start_s:
+            start_s = start_s.split(",", 1)[0]
+        if "," in end_s:
+            end_s = end_s.split(",", 1)[0]
+
+        return _hhmm_to_hms(start_s), _hhmm_to_hms(end_s)
+
+    return None, None
+
 
 def _parse_hhmm(hhmm: str) -> time:
     # "0930" -> time(9,30)
@@ -156,6 +198,14 @@ class IBKRProvider(MarketDataProvider):
             raise ValueError(f"No contract details found for {symbol}")
 
         d0 = details[0]
+        trading_hours = getattr(d0, "tradingHours", "") or ""
+        liquid_hours = getattr(d0, "liquidHours", "") or ""
+
+        # prefer liquidHours for “RTH-ish” liquidity, fallback to tradingHours
+        o, c = _extract_first_session(liquid_hours) 
+        if o is None or c is None:
+            o, c = _extract_first_session(trading_hours)
+
         return TickerInfo(
             symbol=contract.symbol,
             exchange=getattr(contract, "primaryExchange", None) or None,
@@ -164,6 +214,8 @@ class IBKRProvider(MarketDataProvider):
             timezone=getattr(d0, "timeZoneId", None),
             sec_type=contract.secType,
             provider=self.provider,
+            rth_open=o,
+            rth_close=c,
         )
 
     # ---- Equity Info ----
@@ -184,8 +236,8 @@ class IBKRProvider(MarketDataProvider):
         d0 = details[0]
 
         return EquityInfo(
-            sector=getattr(d0, "category", None),
             industry=getattr(d0, "industry", None),
+            sector=getattr(d0, "category", None),
             dividend_yield=getattr(d0, "dividendYield", None),
             pe_ratio=getattr(d0, "peRatio", None),
             eps=getattr(d0, "eps", None),
@@ -214,8 +266,12 @@ class IBKRProvider(MarketDataProvider):
         exchange_name: str,
         start_date: datetime,
         end_date: Optional[datetime] = None,
-        bar_size: Literal["1 day", "1 hour", "5 mins"] = "1 day",
+        bar_size: Literal["1 day", "1 hour", "30 mins", "5 mins"] = "1 day",
+        *,
+        rth_open: time | None = None,
+        rth_close: time | None = None,
     ) -> pd.DataFrame:
+
         """
         Key behaviours:
         - Treat start_date/end_date as exchange-local (your requirement).
@@ -243,8 +299,9 @@ class IBKRProvider(MarketDataProvider):
         _, liquid_by_day = self._get_liquid_hours_map(contract)
 
         # fallback regular hours if contract details didn't give the day
-        fallback_open = time(9, 30)
-        fallback_close = time(16, 0)
+        fallback_open = rth_open or time(9, 30)
+        fallback_close = rth_close or time(16, 0)
+
 
         # duration split (your “granularity”)
         comps = _duration_components(int((end_dt - start_date).total_seconds()))
@@ -295,20 +352,14 @@ class IBKRProvider(MarketDataProvider):
             intended_end = cur_end
 
             # If intraday, clip each *day* separately to avoid fetching the overnight gap.
-            if bar_size in ("1 hour", "5 mins"):
+            if bar_size in ("1 hour", "30 mins", "5 mins"):
                 day = intended_start.replace(hour=0, minute=0, second=0, microsecond=0)
                 last_day = intended_end.replace(hour=0, minute=0, second=0, microsecond=0)
 
                 while day <= last_day:
-                    day_key = day.strftime("%Y%m%d")
-                    rth_open, rth_close = liquid_by_day.get(day_key, (fallback_open, fallback_close))
-
-                    # desired overlap on this day
-                    s = max(intended_start, day.replace(hour=rth_open.hour, minute=rth_open.minute, second=0, microsecond=0))
-                    e = min(intended_end, day.replace(hour=rth_close.hour, minute=rth_close.minute, second=0, microsecond=0))
+                    s = max(intended_start, day.replace(hour=fallback_open.hour, minute=fallback_open.minute, second=0, microsecond=0))
+                    e = min(intended_end,   day.replace(hour=fallback_close.hour, minute=fallback_close.minute, second=0, microsecond=0))
                     if s < e:
-                        # ask IBKR only for this day's RTH slice.
-                        # we use endDateTime=e and durationStr as seconds (small, accurate)
                         secs = int((e - s).total_seconds())
                         bars = _req(e, f"{secs} S")
                         _append_bars(bars)

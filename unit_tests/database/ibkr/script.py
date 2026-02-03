@@ -19,13 +19,16 @@ def main():
     db = DB(db_path = test_env_path, _config = config)
     db._hub.service
     
-    ticker = db.get_ticker("AAPL", "NASDAQ", ensure=True)
+    ticker = db.get_ticker("META", "NASDAQ", ensure=True)
     print(ticker)
+    
+    exchange = ticker.get_exchange()
+    
     
     equity = ticker.get_equity(ensure=True)
     print(equity)
 
-    prices = equity.get_prices(start_date=datetime(2026, 1, 29), period="1 day", ensure=True)
+    prices = equity.get_prices(start_date=datetime(2026, 1, 30), period="5 mins", ensure=True)
     print("----- FINAL PRICES -----")
     print(prices)
 

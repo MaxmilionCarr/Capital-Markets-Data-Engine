@@ -353,12 +353,18 @@ class EquityPricesRepository:
                     pass
 
         def _fetch_and_insert(fetch_start: datetime, fetch_end: datetime) -> None:
+            ex = equity._ticker.get_exchange()
+            rth_open = _parse_hms(ex.rth_open) if ex and ex.rth_open else None
+            rth_close = _parse_hms(ex.rth_close) if ex and ex.rth_close else None
+
             df = self.hub.service.fetch_equity_prices(
                 equity._ticker.symbol,
                 equity._ticker.get_exchange().name,
                 start_date=fetch_start,
                 end_date=fetch_end,
                 bar_size=period,
+                rth_open=rth_open,
+                rth_close=rth_close
             )
             _insert_all(df)
 
@@ -425,7 +431,14 @@ class EquityPricesRepository:
                 merged.append((s, e))
 
         # --- 4) Fetch + insert ---
+        ex = equity._ticker.get_exchange()
+        rth_open = _parse_hms(ex.rth_open) if ex and ex.rth_open else None
+        rth_close = _parse_hms(ex.rth_close) if ex and ex.rth_close else None
         for s, e in merged:
+            if s.time() < rth_open or s.time() >= rth_close:
+                continue
+            if e.time() <= rth_open or e.time() > rth_close:
+                continue
             if e <= s:
                 continue
             _fetch_and_insert(s, e)

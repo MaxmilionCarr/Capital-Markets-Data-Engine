@@ -43,7 +43,6 @@ class Ticker:
             equity = equity_repo.get_or_create_ensure(self)
         return equity
 
-
 class TickerRepository:
     """
     Data-access layer for the `tickers` table.
@@ -188,9 +187,10 @@ class TickerRepository:
             ensured_exchange_id = self.hub.exchange_repo.get_or_create(
                 exchange_name=exchange_name,
                 timezone=tinfo.timezone,
-                rth_open="09:30:00",
-                rth_close="16:00:00",
+                rth_open=tinfo.rth_open or "09:30:00",
+                rth_close=tinfo.rth_close or "16:00:00",
             )
+
 
         # --- 1) If ticker already exists on this exchange_id, return it ---
         existing = self.get_info(exchange_id=ensured_exchange_id, symbol=symbol)
@@ -382,7 +382,7 @@ class Equity:
     ) -> pd.DataFrame:
         price_repo = self._hub.equity_prices_repo
         if not ensure:
-            return price_repo.get_prices(equity=self, period=period, start_date=start_date, end_date=end_date)
+            return price_repo.get_prices(equity=self, period=period, start_date=start_date, end_date=end_date or datetime.now())
         return price_repo.get_or_create_ensure(equity=self, period=period, start_date=start_date, end_date=end_date or datetime.now())
     
 class EquitiesRepository:

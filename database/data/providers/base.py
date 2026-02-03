@@ -18,6 +18,8 @@ class TickerInfo:
     sec_type: Optional[str]
     timezone: Optional[str]
     provider: Provider
+    rth_open: Optional[str] = None   # "HH:MM:SS"
+    rth_close: Optional[str] = None  # "HH:MM:SS"
 
 @dataclass(frozen=True)
 class BondInfo:

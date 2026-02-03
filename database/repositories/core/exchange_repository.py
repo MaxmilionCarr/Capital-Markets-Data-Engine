@@ -31,7 +31,7 @@ class Exchange:
     def get_ticker(self, ticker_symbol: str = None, *, ensure: bool = False):
         """Return a specific ticker by symbol for this exchange."""
         if ensure:
-            return self._hub.ticker_repo.get_or_create_ensure(ticker_symbol, self._id)
+            return self._hub.ticker_repo.get_or_create_ensure(ticker_symbol, exchange_name=self.name)
         return self._hub.ticker_repo.get_info(exchange_id=self._id, symbol=ticker_symbol)
 
 
