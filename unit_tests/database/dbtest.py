@@ -1,7 +1,7 @@
-from .repositories.database import basic_tests
+from .repositories.database import database_tests
 from .repositories.exchanges import exchange_tests
-from .repositories.markets import market_tests
 from .repositories.tickers import ticker_tests
+from .repositories.historicalprice import historical_price_tests
 import argparse
 
 def main():
@@ -9,25 +9,27 @@ def main():
     parser.add_argument(
         "--test",
         type=str,
-        choices=["basic", "exchanges", "markets", "tickers", "all"],
+        choices=["basic", "exchanges", "tickers", "historical_price", "all"],
         default="all",
-        help="Specify which tests to run: 'basic', 'exchanges', 'markets', 'tickers', or 'all'. Default is 'all'.",
+        help="Specify which tests to run: 'basic', 'exchanges', 'tickers', 'historical_price', or 'all'. Default is 'all'.",
     )
     args = parser.parse_args()
 
     if args.test == "basic":
-        basic_tests()
+        database_tests()
     elif args.test == "exchanges":
         exchange_tests()
-    elif args.test == "markets":
-        market_tests()
     elif args.test == "tickers":
         ticker_tests()
+    elif args.test == "historical_price":
+        historical_price_tests()
     elif args.test == "all":
-        basic_tests()
+        database_tests()
         exchange_tests()
-        market_tests()
         ticker_tests()
+        """
+        historical_price_tests()
+        """
 
 if __name__ == "__main__":
     main()

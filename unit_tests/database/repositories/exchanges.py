@@ -1,4 +1,4 @@
-from database.db import DataBase
+from database.db import DB
 import sqlite3 as sql
 import os
 import pandas as pd
@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 load_dotenv()
 test_env_path = os.getenv("TESTING_DATABASE_PATH")
 csv_path = os.getenv("CSV_CONTRACT")
-DB = DataBase(db_path=test_env_path)
-EXCHANGE = DB.exchange_repo
+database = DB(db_path=test_env_path)
+EXCHANGE = database._hub.exchange_repo
 
 # NEED (EXCHANGE_NAME, EXCHANGE_TIMEZONE)
 
@@ -104,10 +104,9 @@ def delete_exchange(exchange_name):
             print("Exchange not found.")
     except Exception as e:
         print(f"Error: {e}")
-
-
         
-if __name__ == "__main__":
+def exchange_tests():
+    print("EXCHANGE TEST SUITE")
     create_exchanges()
     create_duplicate_record()
     fetch_all_exchanges()

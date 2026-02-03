@@ -7,3 +7,5 @@ should use decision tree with knn to build a classification model based on these
 news headline, news text, change in trade volume ratio, movement short term (target)
 
 could branch into calculating the magnitude of effect (Large effect, Small effect) and direction (4 classifications)
+
+Strand to automate graphing using repository functions

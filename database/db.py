@@ -2,13 +2,13 @@
 # FIXME: need to handle connection closing better in handling duplicate creations
 from __future__ import annotations
 import sqlite3 as sql
-from .repositories.core.exchange_repository import ExchangeRepository
-from .repositories.core.market_repository import MarketRepository
-from .repositories.instruments.ticker_repository import TickerRepository, EquitiesRepository
-from .repositories.technical_data.price_repository import HistoricalPricesRepository
+from typing import Any, List
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
+
+from database.data.providers.IBKR_provider import IBKRConfig, IBKRProvider
+#from .data.services.IBKR_service import IBKRService
 
 try:
     from dotenv import load_dotenv
@@ -21,39 +21,126 @@ except Exception as e:
     print("Not using environment variables, please configure your .env file.")
 
 @dataclass
-class Data:
-    db_path: str
-
-    def get_exchange(self, exchange_name: str):
-        db = DataBase(self.db_path)
-        return db.exchange_repo.get_info(exchange_name=exchange_name)
+class Config:
+    provider: str = "IBKR"
+    provider_config: dict[str, Any] = field(default_factory=dict)
+    # policy knobs you’ll want soon:
+    allow_ensure: bool = True
+    overwrite_priority: tuple[str, ...] = ("IBKR", "YFINANCE")  # higher wins
+        
+class Hub:
+    def __init__(self, connection: sql.Connection, config: Config):
+        self.conn = connection
+        self.config = config
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        
+        self._service = None
+        self._exchange_repo = None
+        self._ticker_repo = None
+        self._equities_repo = None
+        
+        self._equity_prices_repo = None
     
-    def get_market(self, market_name: str, exchange_name: str):
-        db = DataBase(self.db_path)
-        exchange_id = db.exchange_repo.get_info(exchange_name=exchange_name)._id
-        return db.market_repo.get_info(exchange_id=exchange_id, market_name=market_name)
-    
-    def get_ticker(self, symbol: str, exchange_name: str, market_name: str):
-        db = DataBase(self.db_path)
-        exchange = db.exchange_repo.get_info(exchange_name=exchange_name)
-        if not exchange:
-            return None
-        market = db.market_repo.get_info(exchange_id=exchange._id, market_name=market_name)
-        if not market:
-            return None
-        return market.get_ticker(ticker_symbol=symbol)
+    @property
+    def service(self):
+        if self._service is None:
+            if self.config.provider == "IBKR":
+                from database.data.services.IBKR_service import IBKRService
+                cfg = IBKRConfig()
+                provider = IBKRProvider()
+                self._service = IBKRService(provider)
+            else:
+                raise ValueError(f"Unknown provider {self.config.provider}")
+        return self._service
 
+    @property
+    def exchange_repo(self):
+        from .repositories.core.exchange_repository import ExchangeRepository
+        if self._exchange_repo is None:
+            self._exchange_repo = ExchangeRepository(self.conn, hub=self)
+        return self._exchange_repo
+    
+    @property
+    def ticker_repo(self):
+        from .repositories.instruments.ticker_repository import TickerRepository
+        if self._ticker_repo is None:
+            self._ticker_repo = TickerRepository(self.conn, hub=self)
+        return self._ticker_repo
+
+    @property
+    def equities_repo(self):
+        from .repositories.instruments.ticker_repository import EquitiesRepository
+        if self._equities_repo is None:
+            self._equities_repo = EquitiesRepository(self.conn, hub=self)
+        return self._equities_repo
+    
+    @property
+    def equity_prices_repo(self):
+        from .repositories.technical_data.price_repository import EquityPricesRepository
+        if self._equity_prices_repo is None:
+            self._equity_prices_repo = EquityPricesRepository(self.conn, hub=self)
+        return self._equity_prices_repo
+    
+    '''
+    @property
+    def ticker_service(self):
+        if self._ticker_service is None:
+            from services.ticker_service import TickerService
+            self._ticker_service = TickerService(self.conn, self.provider, self.tickers)
+        return self._ticker_service
+    '''
+
+@dataclass
+class DB:
+    db_path: str = env_path
+    _config: Config = field(default_factory=Config)
+
+    _connection: sql.Connection = field(init=False)
+    _hub: Hub = field(init=False)
+
+    def __post_init__(self):
+        self._connection = sql.connect(self.db_path)
+        self._connection.execute("PRAGMA foreign_keys = ON")
+        # strongly recommended for your workload:
+        self._connection.execute("PRAGMA journal_mode = WAL")
+        self._hub = Hub(self._connection, self._config)
+
+    def close(self):
+        try:
+            self._connection.close()
+        except Exception:
+            pass
+    
+    def get_exchange_id(self, exchange_name: str) -> int | None:
+        exchange = self._hub.exchange_repo.get_info(exchange_name = exchange_name)
+        if exchange is not None:
+            return exchange._id
+        return None
+
+    # Allow for a search without exchange name through a bulk insert
+    from .repositories.instruments.ticker_repository import Ticker  
+    def get_ticker(self, symbol: str, exchange_name: str, *, ensure: bool = False) -> Ticker | List[Ticker]:
+        exchange_name = exchange_name.strip()
+
+        if not ensure:
+            exchange_id = self.get_exchange_id(exchange_name)
+            if not exchange_id:
+                raise sql.Error(f"Exchange '{exchange_name}' not found")
+            t = self._hub.ticker_repo.get_info(exchange_id=exchange_id, symbol=symbol)
+            if t is None:
+                raise sql.Error(f"Ticker '{symbol}' not found on exchange '{exchange_name}'")
+            return t
+
+        # ensure=True:
+        return self._hub.ticker_repo.get_or_create_ensure(symbol=symbol, exchange_name=exchange_name)
+
+# FIXME
 class DataBase:
     # TODO: add flow down identifiers for exchange, market when creating tickers so don't have to ladder up
     def __init__(self, db_path=env_path):
         self.path = db_path
         self.connection = sql.connect(db_path)
         self.connection.execute("PRAGMA foreign_keys = ON")
-        self.exchange_repo = ExchangeRepository(self.connection)
-        self.market_repo = MarketRepository(self.connection)
-        self.ticker_repo = TickerRepository(self.connection)
-        self.equity_repo = EquitiesRepository(self.connection)
-        self.historical_price_repo = HistoricalPricesRepository(self.connection)
 
     def close(self):
         self.connection.close()
@@ -72,37 +159,42 @@ class DataBase:
         cur.execute('''CREATE TABLE IF NOT EXISTS exchanges (
                         exchange_id INTEGER PRIMARY KEY,
                         exchange_name TEXT NOT NULL UNIQUE,
-                        timezone TEXT NOT NULL
+                        timezone TEXT NOT NULL,
+                        rth_open TEXT NOT NULL,
+                        rth_close TEXT NOT NULL
                     )''')
         cur.execute('''CREATE INDEX IF NOT EXISTS idx_exchanges_name ON exchanges (exchange_name)''')
-
-        cur.execute('''CREATE TABLE IF NOT EXISTS markets (
-                        market_id INTEGER NOT NULL,
-                        exchange_id INTEGER NOT NULL,
-                        market_name TEXT NOT NULL,
-                        PRIMARY KEY (market_id, exchange_id),
-                        FOREIGN KEY (exchange_id) REFERENCES exchanges(exchange_id) ON DELETE CASCADE
-                    )''')
-        cur.execute('''CREATE INDEX IF NOT EXISTS idx_markets_name ON markets (market_name)''')
+        
+        # --- Ticker Tables ---
+        
+        cur.execute('''CREATE TABLE IF NOT EXISTS underlyings (
+                        underlying_id INTEGER PRIMARY KEY,
+                        symbol TEXT NOT NULL UNIQUE
+                    );''')
         
         cur.execute('''CREATE TABLE IF NOT EXISTS tickers (
                         ticker_id INTEGER PRIMARY KEY,
-                        symbol TEXT NOT NULL,
-                        market_id INTEGER NOT NULL,
+                        underlying_id INTEGER NOT NULL,
                         exchange_id INTEGER NOT NULL,
-                        currency TEXT NOT NULL,
-                        full_name TEXT,
-                        description TEXT,
-                        source TEXT NOT NULL,
-                        UNIQUE(symbol, exchange_id),
-                        FOREIGN KEY (market_id, exchange_id) REFERENCES markets(market_id, exchange_id) ON DELETE CASCADE
-                    )''')
-        
-        # --- Market Specific Tables ---
 
-        cur.execute('''CREATE TABLE IF NOT EXISTS equities (
-                        ticker_id INTEGER PRIMARY KEY,
                         symbol TEXT NOT NULL,
+                        full_name TEXT,
+                        currency TEXT NOT NULL,
+                        
+                        source TEXT NOT NULL,
+
+                        UNIQUE(symbol, exchange_id),
+                        FOREIGN KEY (exchange_id) REFERENCES exchanges(exchange_id) ON DELETE CASCADE,
+                        FOREIGN KEY (underlying_id) REFERENCES underlyings(underlying_id) ON DELETE CASCADE
+                    );''')
+        
+        # --- Security Type ---
+        
+        # -- Equity Table --
+        cur.execute('''CREATE TABLE IF NOT EXISTS equities (
+                        equity_id INTEGER PRIMARY KEY,
+                        ticker_id INTEGER NOT NULL,
+
                         sector TEXT,
                         industry TEXT,
                         dividend_yield REAL,
@@ -110,60 +202,32 @@ class DataBase:
                         eps REAL,
                         beta REAL,
                         market_cap REAL,
+                        
                         FOREIGN KEY (ticker_id) REFERENCES tickers(ticker_id) ON DELETE CASCADE
-                    )''')
+                    );''')
         
-        cur.execute('''CREATE TABLE IF NOT EXISTS bonds (
-                        ticker_id INTEGER PRIMARY KEY,
-                        symbol TEXT NOT NULL,
-                        maturity_date DATE,
-                        coupon_rate REAL,
-                        yield_to_maturity REAL,
-                        credit_rating TEXT,
-                        FOREIGN KEY (ticker_id) REFERENCES tickers(ticker_id) ON DELETE CASCADE
-                    )''')
-
-        # --- Equities Tables ---   
-        cur.execute('''CREATE TABLE IF NOT EXISTS historical_prices (
-                        ticker_id INTEGER NOT NULL REFERENCES tickers(ticker_id) ON DELETE CASCADE,
+        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices (
+                        equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
                         datetime DATETIME NOT NULL,
                         open REAL,
                         high REAL,
                         low REAL,
                         close REAL NOT NULL,
                         volume INTEGER,
-                        PRIMARY KEY (ticker_id, datetime)
+                        PRIMARY KEY (equity_id, datetime)
                     )''')
         
-        cur.execute('''CREATE INDEX IF NOT EXISTS idx_prices_ticker_time ON historical_prices (ticker_id, datetime)''')
+        cur.execute('''CREATE INDEX IF NOT EXISTS idx_prices_equity_time ON equity_prices (equity_id, datetime)''')
         
-        cur.execute('''CREATE TABLE IF NOT EXISTS option_chains (
-                        option_id INTEGER PRIMARY KEY,
-                        ticker_id INTEGER NOT NULL REFERENCES equity_data(ticker_id) ON DELETE CASCADE,
-                        symbol TEXT NOT NULL,
-                        creation_date DATE,
-                        expiration_date DATE NOT NULL,
-                        strike_price REAL NOT NULL,
-                        option_type TEXT NOT NULL,
-                        UNIQUE(ticker_id, expiration_date, strike_price, option_type)
-                    )''')
+        # TODO: 
         
-        cur.execute('''CREATE TABLE IF NOT EXISTS option_prices (
-                        option_id INTEGER NOT NULL REFERENCES option_chains(option_id) ON DELETE CASCADE,
-                        datetime DATETIME NOT NULL,
-                        bid REAL,
-                        ask REAL,
-                        last_price REAL NOT NULL,
-                        volume INTEGER,
-                        open_interest INTEGER,
-                        PRIMARY KEY (option_id, datetime)
-                    )''')
+        # -- Bond Table --
         
-        cur.execute('''CREATE INDEX IF NOT EXISTS idx_option_prices_id_time ON option_prices (option_id, datetime)''')
 
-        # --- Bonds Tables ---
-        # TO BE ADDED
 
+        # --- Prices Table ---   
+        
+        
         # --- Check --- 
         res = cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
         print("Tables in database:")
@@ -171,6 +235,7 @@ class DataBase:
             print(row[0])
         con.commit()
         con.close()
+        print("Database created successfully.")
     
     def delete_db(self):
         self.connection.close()

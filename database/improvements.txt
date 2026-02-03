@@ -9,3 +9,5 @@
 10.) REALLY NEED TO CLEAN THIS PART UP IT LOOKS LIKE SHIT
 11.) get_info functions should be able to fetch based on name not just id
 12.) Need to make a functional repository for updating database schemas
+
+13.) Major::: Exchange and Market Repositories should be populated from ticker initalisations

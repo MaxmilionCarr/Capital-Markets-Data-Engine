@@ -1,2 +1,1 @@
-1.) Need to debug markets, tickers before moving onto historical prices (This is when i can start pulling from IBKR)
-2.) Need to create unit tests for all database workers
+1.) Fix testing modules

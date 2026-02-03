@@ -32,6 +32,7 @@ def basic_tests():
     print("CORE DATABASE TESTS")
     run = 0
     run += test_database_delete()
+    time.sleep(2)
     run += test_database_create()
 
     if run != 2:
@@ -41,5 +42,7 @@ def basic_tests():
         print("Database tests passed.")
         return 1
     
-if __name__ == "__main__":
+def database_tests():
+    print("DATABASE TEST SUITE")
     basic_tests()
+    # Add more database related tests here in the future

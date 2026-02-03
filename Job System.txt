@@ -1,0 +1,283 @@
+from __future__ import annotations
+from datetime import datetime
+import sqlite3 as sql
+from typing import Optional, List, Tuple, Any
+from dataclasses import dataclass
+from functools import cached_property
+import pandas as pd
+from typing_extensions import Literal
+
+@dataclass
+class Ticker:
+    _id: int
+    symbol: str
+    _exchange_id: int
+    currency: str
+    full_name: str
+    description: str
+    _source: str
+    _connection: sql.Connection
+       
+    @cached_property
+    def exchange_name(self) -> str:
+        """Return the exchange name for this ticker."""
+        from database.repositories.core.exchange_repository import ExchangeRepository
+        repo = ExchangeRepository(self._connection)
+        exchange = repo.get_info(exchange_id=self._exchange_id)
+        return exchange.name if exchange else "Unknown"
+
+    # Fetching Exchanges
+    def get_exchange(self):
+        """Return the exchange for this ticker."""
+        from database.repositories.core.exchange_repository import ExchangeRepository
+        repo = ExchangeRepository(self._connection)
+        return repo.get_info(exchange_id=self._exchange_id)
+
+    # Fetching Historical Prices
+    def get_prices(self, start_date: datetime, end_date: datetime | None = None, *, period: Literal["5 Minutes", "1 Hour", "1 Day"] = "1 Day") -> pd.DataFrame:
+        """Return historical prices for this ticker."""
+        from database.repositories.technical_data.price_repository import HistoricalPricesRepository
+        repo = HistoricalPricesRepository(self._connection)
+        return repo.get_info(self._id, period, start_date, end_date)
+    
+    # TODO: Implement further methods that help for data fetch without knowing exact dates
+
+    # NEED BOND INFO LATER
+    '''
+    @cached_property
+    def equity_info(self) -> Equity | None:
+        """Return equity-specific info if this ticker is an equity."""
+        if self.market_id != 1:
+            print("Ticker is not an equity based on market_id.")
+            return None
+        repo = EquitiesRepository(self._connection)
+        return repo.get_info(ticker_id=self.id, symbol=self.symbol)
+    '''
+    
+
+# This is the primary table for all instruments
+class TickerRepository:
+    """
+    Data-access layer for the `tickers` table.
+
+    Schema:
+        ticker_id INTEGER PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        exchange_id INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        full_name TEXT,
+        description TEXT,
+        source TEXT NOT NULL,
+        UNIQUE(symbol, exchange_id),
+        FOREIGN KEY (exchange_id) REFERENCES exchanges(exchange_id) ON DELETE CASCADE
+    """
+
+    def __init__(self, connection: sql.Connection):
+        self.connection = connection
+        # Ensure foreign key constraints are enforced
+        self.connection.execute("PRAGMA foreign_keys = ON")
+    
+    # ---------- READ ----------
+
+    def get_all(self) -> List[Ticker]:
+        """Return all tickers as a list of Ticker objects."""
+        cur = self.connection.cursor()
+        cur.execute("SELECT ticker_id, symbol, exchange_id, currency, full_name, description, source FROM tickers")
+        rows = cur.fetchall()
+        return [Ticker(*row, _connection=self.connection) for row in rows]
+    
+    def get_by_symbol(self, symbol: str) -> List[Ticker]:
+        """Return all tickers matching the given symbol."""
+        cur = self.connection.cursor()
+        cur.execute(
+            "SELECT ticker_id, symbol, exchange_id, currency, full_name, description, source FROM tickers WHERE symbol = ?",
+            (symbol,),
+        )
+        rows = cur.fetchall()
+        return [Ticker(*row, _connection=self.connection) for row in rows]
+
+    # TODO: need to make it so that get_info is based around a symbols exchange and market too
+    def get_info(self, exchange_id: int, *, symbol: str | None = None, ticker_id: int | None = None) -> Ticker:
+        """
+        Return a single row by primary key or None if not found.
+        """
+
+        if symbol is None and ticker_id is None:
+            raise ValueError("Must provide symbol or ticker_id")
+        
+        cur = self.connection.cursor()
+
+        # If both provided, prefer ticker_id
+        if ticker_id is not None:
+            try:
+                cur.execute(
+                    f"SELECT ticker_id, symbol, exchange_id, currency, full_name, description, source FROM tickers WHERE ticker_id = ? AND exchange_id = ?",
+                    (ticker_id, exchange_id),
+                )
+                row = cur.fetchone()
+                if row:
+                    return Ticker(*row, _connection=self.connection)
+            except sql.Error as e:
+                print(f"Error fetching ticker by ticker_id: {e}")
+                pass
+            
+        if symbol is not None:
+            try:
+                cur.execute(
+                    f"SELECT ticker_id, symbol, exchange_id, currency, full_name, description, source FROM tickers WHERE symbol = ? AND exchange_id = ?",
+                    (symbol, exchange_id),
+                )
+                row = cur.fetchone()
+                if row:
+                    return Ticker(*row, _connection=self.connection)
+            except sql.Error as e:
+                print(f"Error fetching ticker by symbol: {e}")
+                pass
+
+        raise sql.Error
+    
+    # FIXME: Should make any errors return as errors not None
+    def get_info_by_exchange(self, exchange_id: int, *, symbol: str | None = None, ticker_id: int | None = None) -> List[Ticker] | None:
+        """
+        Return rows by primary key and exchange or None if not found.
+        """
+        if symbol is None and ticker_id is None:
+            raise ValueError("Must provide symbol or ticker_id")
+        cur = self.connection.cursor()
+        if ticker_id is not None:
+            try:
+                cur.execute(
+                    f"SELECT ticker_id, symbol, exchange_id, currency, full_name, description, source FROM tickers WHERE ticker_id = ? AND exchange_id = ?",
+                    (ticker_id, exchange_id),
+                )
+                rows = cur.fetchall()
+                if rows:
+                    return [Ticker(*row, _connection=self.connection) for row in rows]
+            except sql.Error as e:
+                print(f"Error fetching ticker by ticker_id: {e}")
+                pass
+            
+        if symbol is not None:
+            try:
+                cur.execute(
+                    f"SELECT ticker_id, symbol, exchange_id, currency, full_name, description, source FROM tickers WHERE symbol = ? AND exchange_id = ?",
+                    (symbol, exchange_id),
+                )
+                rows = cur.fetchall()
+                if rows:
+                    return [Ticker(*row, _connection=self.connection) for row in rows]
+            except sql.Error as e:
+                print(f"Error fetching ticker by symbol: {e}")
+                pass
+
+        return None
+    
+    def get_by_exchange(self, exchange_id: int) -> List[Ticker]:
+        """Return all tickers for a given exchange_id."""
+        cur = self.connection.cursor()
+        cur.execute(
+            "SELECT ticker_id, symbol, exchange_id, currency, full_name, description, source FROM tickers WHERE exchange_id = ?",
+            (exchange_id,),
+        )
+        rows = cur.fetchall()
+        return [Ticker(*row, _connection=self.connection) for row in rows]
+    
+    # ---------- CREATE ----------
+
+    def create(self, symbol: str, exchange_id: int, *, currency: str, full_name: str | None = None, description: str | None = None, source: str) -> int:
+        """
+        Insert a new ticker and return its ID.
+        """
+        cur = self.connection.cursor()
+        try:
+            cur.execute(
+                f"INSERT INTO tickers (symbol, exchange_id, currency, full_name, description, source) VALUES (?, ?, ?, ?, ?, ?)",
+                (symbol, exchange_id, currency, full_name, description, source),
+            )
+            self.connection.commit()
+        except sql.Error as e:
+            print(f"SQL error: {e}")
+            cur.close()
+            raise e
+
+    # TODO: Use create and get_info instead of rewriting logic
+    def get_or_create(self, symbol: str, exchange_id: int, *, currency: str, full_name: str | None = None, description: str | None = None, source: str) -> int:
+        """
+        Return the ID of a row where unique_col == unique_val,
+        or create it using defaults if it doesn't exist.
+        """
+        
+        try:
+            return self.get_info(exchange_id=exchange_id, symbol=symbol)._id
+        except sql.Error:
+            print(f"Ticker {symbol} not found in exchange {exchange_id}.")
+            pass
+
+        return self.create(symbol=symbol, exchange_id=exchange_id, currency=currency, full_name=full_name, description=description, source=source)
+
+    # ---------- UPDATE ----------
+
+    def update(self, ticker_id: str, *, symbol: str | None = None, exchange_id: int | None = None, currency: str | None = None, full_name: str | None = None, description: str | None = None, source: str | None = None) -> int:
+        """
+        Update given columns for a row.
+        Returns number of rows updated.
+        """
+        if not (symbol or exchange_id or currency or full_name or description or source):
+            raise ValueError("Must provide at least one field to update")
+        cur = self.connection.cursor()
+        fields = []
+        values = []
+        if symbol is not None:
+            fields.append("symbol = ?")
+            values.append(symbol)
+        if exchange_id is not None:
+            fields.append("exchange_id = ?")
+            values.append(exchange_id)
+        if currency is not None:
+            fields.append("currency = ?")
+            values.append(currency)
+        if full_name is not None:
+            fields.append("full_name = ?")
+            values.append(full_name)
+        if description is not None:
+            fields.append("description = ?")
+            values.append(description)
+        if source is not None:
+            fields.append("source = ?")
+            values.append(source)
+        values.append(ticker_id)
+        cur.execute(
+            f"UPDATE tickers SET {', '.join(fields)} WHERE ticker_id = ?",
+            tuple(values),
+        )
+        self.connection.commit()
+        return cur.rowcount
+
+    # ---------- DELETE ----------
+
+    def delete(self, *, ticker_id: int | None = None, symbol: str | None = None) -> int:
+        """
+        Delete a row by primary key or symbol.
+        Returns number of rows deleted.
+        """
+        if ticker_id is None and symbol is None:
+            raise ValueError("Must provide ticker_id or symbol")
+        cur = self.connection.cursor()
+        if ticker_id is not None:
+            cur.execute("DELETE FROM tickers WHERE ticker_id = ?", (ticker_id,))
+        elif symbol is not None:
+            cur.execute("DELETE FROM tickers WHERE symbol = ?", (symbol,))
+        self.connection.commit()
+        return cur.rowcount
+
+    def delete_all(self) -> int:
+        """
+        Delete ALL tickers.
+        Returns number of rows deleted.
+        """
+        cur = self.connection.cursor()
+        cur.execute("DELETE FROM tickers")
+        self.connection.commit()
+        return cur.rowcount
+
+
