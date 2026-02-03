@@ -435,12 +435,11 @@ class EquityPricesRepository:
         rth_open = _parse_hms(ex.rth_open) if ex and ex.rth_open else None
         rth_close = _parse_hms(ex.rth_close) if ex and ex.rth_close else None
         for s, e in merged:
-            if s.time() < rth_open or s.time() >= rth_close:
-                continue
-            if e.time() <= rth_open or e.time() > rth_close:
-                continue
+            print(s, e)
+
             if e <= s:
                 continue
+            
             _fetch_and_insert(s, e)
 
         return self.get_prices(equity, period, start_date, end_date)
