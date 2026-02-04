@@ -367,6 +367,7 @@ class EquityPricesRepository:
                 rth_close=rth_close
             )
             _insert_all(df)
+            
         def _clip_window_to_rth_per_day(
             s: datetime,
             e: datetime,
@@ -385,6 +386,10 @@ class EquityPricesRepository:
             last = e.replace(hour=0, minute=0, second=0, microsecond=0)
 
             while day <= last:
+                if day.weekday() >= 5:  # skip weekends
+                    day += timedelta(days=1)
+                    continue
+                
                 d_open = day.replace(hour=rth_open.hour, minute=rth_open.minute, second=0, microsecond=0)
                 d_close = day.replace(hour=rth_close.hour, minute=rth_close.minute, second=0, microsecond=0)
 
@@ -397,6 +402,32 @@ class EquityPricesRepository:
                 day += timedelta(days=1)
 
             return out
+        
+        def _stitch_slices(slices: list[tuple[datetime, datetime]], *, rth_open: time, rth_close: time) -> list[tuple[datetime, datetime]]:
+            """
+            Stitch per-day RTH slices into bigger windows when they are "adjacent" across days:
+            - if previous ends exactly at rth_close AND next starts exactly at rth_open of a later day,
+                treat as continuous RTH block and stitch.
+            """
+            if not slices:
+                return []
+
+            slices = sorted(slices, key=lambda x: x[0])
+            out: list[tuple[datetime, datetime]] = []
+            cur_s, cur_e = slices[0]
+
+            for s, e in slices[1:]:
+                # if cur ends at close AND next begins at open, stitch
+                if cur_e.time() == rth_close and s.time() == rth_open:
+                    # allow gap of >= 0 days (overnight/weekend). We'll stitch anyway.
+                    cur_e = e
+                else:
+                    out.append((cur_s, cur_e))
+                    cur_s, cur_e = s, e
+
+            out.append((cur_s, cur_e))
+            return out
+
 
         # --- 1) Read what we already have ---
         existing = self.get_prices(equity, period, start_date, end_date)
@@ -463,30 +494,28 @@ class EquityPricesRepository:
         # --- 4) Fetch + insert ---
         ex = equity._ticker.get_exchange()
 
-        # never allow None
         rth_open = _parse_hms(ex.rth_open) if ex and getattr(ex, "rth_open", None) else time(9, 30)
         rth_close = _parse_hms(ex.rth_close) if ex and getattr(ex, "rth_close", None) else time(16, 0)
 
         for s, e in merged:
-
             if e <= s:
                 continue
 
-            # IMPORTANT: clip first
+            # Clip into per-day RTH slices
             slices = _clip_window_to_rth_per_day(s, e, rth_open, rth_close)
-
-            # If no overlap with RTH anywhere, do not call IBKR
             if not slices:
                 continue
 
-            # Call only for the clipped slices
-            for ss, ee in slices:
-                print("CLIPPED FETCH:", ss, ee)
-                
+            # Stitch slices back together to reduce IBKR calls
+            stitched = _stitch_slices(slices, rth_open=rth_open, rth_close=rth_close)
+
+            for ss, ee in stitched:
+                print("STITCHED FETCH:", ss, ee)
                 _fetch_and_insert(ss, ee)
 
+        # IMPORTANT: return AFTER processing all windows
+        return self.get_prices(equity, period, start_date, end_date)
 
-            return self.get_prices(equity, period, start_date, end_date)
 
 
     # ---------- UPDATE ----------

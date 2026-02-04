@@ -10,18 +10,19 @@ test_env_path = os.getenv("TESTING_DATABASE_PATH")
 
 load_dotenv()
 
-def time_request_check():
+def time_request_check(ticker_symbol="AAPL", exchange_name="NASDAQ", start_date=None, end_date=None):
+    
     start = datetime.now()
     
     config = Config(
         provider = "IBKR",
-        provider_config = IBKRConfig(),
+        provider_config = IBKRConfig(client_id=2),
     )
     
     db = DB(db_path = test_env_path, _config = config)
     db._hub.service
     
-    ticker = db.get_ticker("AMZN", "NASDAQ", ensure=True)
+    ticker = db.get_ticker(ticker_symbol, exchange_name, ensure=True)
     print(ticker)
     
     exchange = ticker.get_exchange()
@@ -30,13 +31,11 @@ def time_request_check():
     equity = ticker.get_equity(ensure=True)
     print(equity)
 
-    prices = equity.get_prices(start_date=datetime(2025, 12, 5), period="5 mins", ensure=True)
-    print("----- FINAL PRICES -----")
-    print(prices)
+    prices = equity.get_prices(start_date=start_date, end_date=end_date, period="5 mins", ensure=True)
     
     end = datetime.now()
-    print(f"Time taken: {end - start}")
-    return prices
+    
+    return end - start, prices
 
 def plot_prices(prices):
     plt.figure(figsize=(12, 6))
@@ -49,12 +48,57 @@ def plot_prices(prices):
     plt.show()
 
 if __name__ == "__main__":
-    '''
-    print("COLD REQUEST")
-    time_request_check()
-    '''
+    start_date = datetime(2024, 7, 1)
     
-    print("\nWARM REQUEST")
-    prices = time_request_check()
-    plot_prices(prices)
+    # One day test
+    print("----- ONE DAY TEST -----")
+    duration_day, prices_day = time_request_check(
+        ticker_symbol="SHOP",
+        exchange_name="NASDAQ",
+        start_date=start_date,
+        end_date=datetime(2024, 7, 2, 16, 0, 0)
+    )
+    print("----- Prices -----")
+    print(prices_day)
+    
+    # One week test
+    print("----- ONE WEEK TEST -----")
+    duration_week, prices_week = time_request_check(
+        ticker_symbol="META",
+        exchange_name="NASDAQ",
+        start_date=start_date,
+        end_date=datetime(2024, 7, 8, 16, 0, 0)
+    )
+    print("----- Prices -----")
+    print(prices_week)
+    
+    # One month test
+    print("----- ONE MONTH TEST -----")
+    duration_month, prices_month = time_request_check(
+        ticker_symbol="ORCL",
+        exchange_name="NASDAQ",
+        start_date=start_date,
+        end_date=datetime(2024, 7, 31, 16, 0, 0)
+    )
+    print("----- Prices -----")
+    print(prices_month)
+    
+    # One year test
+    print("----- ONE YEAR TEST -----")
+    duration_year, prices_year = time_request_check(
+        ticker_symbol="AAPL",
+        exchange_name="NASDAQ",
+        start_date=start_date,
+        end_date=datetime(2025, 7, 1, 16, 0, 0)
+    )
+    print("----- Prices -----")
+    print(prices_year)
+    
+    print("----- SUMMARY OF DURATIONS -----")
+    print(f"Duration for 1 day: {duration_day}")
+    print(f"Duration for 1 week: {duration_week}")
+    print(f"Duration for 1 month: {duration_month}")
+    print(f"Duration for 1 year: {duration_year}")
+    
+    
     

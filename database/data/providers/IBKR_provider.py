@@ -271,111 +271,154 @@ class IBKRProvider(MarketDataProvider):
         rth_open: time | None = None,
         rth_close: time | None = None,
     ) -> pd.DataFrame:
-
         """
-        Key behaviours:
-        - Treat start_date/end_date as exchange-local (your requirement).
-        - Fetch in chunks (Y/W/D/S) BUT clip each chunk to RTH (liquidHours if available, else fallback 09:30-16:00).
-        - Enforce anchor based on start_date for intraday bars:
-            start=09:30 & 1 hour -> keep 09:30,10:30,...
+        Fast fetch strategy:
+        - 5 mins  -> 5 D chunks
+        - 30 mins -> 30 D chunks
+        - 1 hour  -> 30 D chunks
+        - 1 day   -> 1 Y chunks, remainder in D/S
+        Uses useRTH=True to avoid overnight bars.
+        Does NOT day-clip (no per-day loop).
+
+        NOTE: endDateTime passed as string to avoid tz-naive Timestamp issues in ib_async.
         """
 
         if not self._connected:
             raise ConnectionError("Not connected to IBKR. Call connect() first.")
+
+        end_dt = end_date or datetime.now()
+        if end_dt <= start_date:
+            raise ValueError("end_date must be after start_date")
 
         contract = Contract()
         contract.symbol = symbol
         contract.secType = "STK"
         contract.exchange = "SMART"
         contract.primaryExchange = exchange_name
-
         contract = self._ib.qualifyContracts(contract)[0]
 
-        end_dt = end_date or datetime.now()
-        if end_dt <= start_date:
-            raise ValueError("end_date must be after start_date")
+        # fallback RTH window (used only for optional trimming at the end)
+        open_t = rth_open or time(9, 30)
+        close_t = rth_close or time(16, 0)
 
-        # pull per-day liquid hours (covers holidays/early closes etc); if you don't care, you can ignore it
-        _, liquid_by_day = self._get_liquid_hours_map(contract)
+        def _ib_end_str(dt: datetime) -> str:
+            # string avoids tz conversion inside ib_async
+            return dt.strftime("%Y%m%d %H:%M:%S")
 
-        # fallback regular hours if contract details didn't give the day
-        fallback_open = rth_open or time(9, 30)
-        fallback_close = rth_close or time(16, 0)
-
-
-        # duration split (your “granularity”)
-        comps = _duration_components(int((end_dt - start_date).total_seconds()))
-
-        data: list[dict] = []
-
+        request_counter = 0
         def _req(end_dt_req: datetime, duration_str: str) -> list:
+            nonlocal request_counter
+            request_counter += 1
+            print(f"Request Number {request_counter}: end_dt={end_dt_req}, duration={duration_str}, bar_size={bar_size}")
             return self._ib.reqHistoricalData(
                 contract,
-                endDateTime=end_dt_req,
+                endDateTime=_ib_end_str(end_dt_req),
                 durationStr=duration_str,
                 barSizeSetting=bar_size,
                 whatToShow="TRADES",
                 useRTH=True,
             )
 
-        # walk backward like your original code, but we clip each chunk so we don't ask for 00:00->09:30 gaps
-        cur_end = end_dt
-
-        def _append_bars(bars):
-            for bar in bars:
-                data.append(
+        def _append_bars(bars, out: list[dict]) -> None:
+            for b in bars:
+                out.append(
                     {
-                        "datetime": bar.date,
-                        "open": bar.open,
-                        "high": bar.high,
-                        "low": bar.low,
-                        "close": bar.close,
-                        "volume": bar.volume,
+                        "datetime": b.date,
+                        "open": b.open,
+                        "high": b.high,
+                        "low": b.low,
+                        "close": b.close,
+                        "volume": b.volume,
                     }
                 )
 
-        for key, unit, step in (
-            ("years", "Y", lambda n: timedelta(days=365 * n)),
-            ("weeks", "W", lambda n: timedelta(weeks=n)),
-            ("days", "D", lambda n: timedelta(days=n)),
-            ("seconds", "S", lambda n: timedelta(seconds=n)),
-        ):
-            n = comps[key]
-            if n <= 0:
-                continue
+        # -------- chunk policy --------
+        if bar_size == "5 mins":
+            chunk_td = timedelta(days=9)
+        elif bar_size in ("30 mins", "1 hour"):
+            chunk_td = timedelta(days=30)
+        else:
+            chunk_td = None  # daily handled separately
 
-            duration_str = f"{n} {unit}"
+        data: list[dict] = []
+        cur_end = end_dt
 
-            # ---- CLIP REQUEST WINDOW TO RTH (simple + effective) ----
-            # We know the intended window is [cur_end - step(n), cur_end].
-            intended_start = cur_end - step(n)
-            intended_end = cur_end
+        # -------- intraday: calendar chunks + final seconds --------
+        if bar_size in ("5 mins", "30 mins", "1 hour"):
+            while cur_end > start_date:
+                remaining = cur_end - start_date
+                if remaining <= timedelta(seconds=0):
+                    break
 
-            # If intraday, clip each *day* separately to avoid fetching the overnight gap.
-            # TODO: MAKE THIS WORK FASTER BY NOT CLIPPING EVERY DAY, WE KNOW HOW LONG EACH DAY LASTS SO WHY NOT JUST ACCOUNT FOR WEEKENDS AND FETCH DATA
-            if bar_size in ("1 hour", "30 mins", "5 mins"):
-                day = intended_start.replace(hour=0, minute=0, second=0, microsecond=0)
-                last_day = intended_end.replace(hour=0, minute=0, second=0, microsecond=0)
+                this_td = chunk_td if remaining > chunk_td else remaining
 
-                while day <= last_day:
-                    s = max(intended_start, day.replace(hour=fallback_open.hour, minute=fallback_open.minute, second=0, microsecond=0))
-                    e = min(intended_end,   day.replace(hour=fallback_close.hour, minute=fallback_close.minute, second=0, microsecond=0))
-                    if s < e:
-                        secs = int((e - s).total_seconds())
-                        bars = _req(e, f"{secs} S")
-                        _append_bars(bars)
-                    day += timedelta(days=1)
-            else:
-                # daily bars are fine with durationStr
-                bars = _req(cur_end, duration_str)
-                _append_bars(bars)
+                # if the remainder is small, use seconds
+                secs = int(this_td.total_seconds())
+                if secs <= 0:
+                    break
 
-            cur_end -= step(n)
+                # prefer days chunks for bigger windows (more stable than massive seconds)
+                if this_td >= timedelta(days=1):
+                    days = max(1, int(this_td.total_seconds() // 86400))
+                    bars = _req(cur_end, f"{days} D")
+                else:
+                    bars = _req(cur_end, f"{secs} S")
+
+                _append_bars(bars, data)
+                cur_end = cur_end - this_td
+
+        # -------- daily: yearly chunks + remainder --------
+        else:
+            while cur_end > start_date:
+                remaining = cur_end - start_date
+                if remaining <= timedelta(seconds=0):
+                    break
+
+                # use whole years where possible
+                if remaining >= timedelta(days=365):
+                    years = int(remaining.days // 365)
+                    years = max(1, years)
+                    bars = _req(cur_end, f"{years} Y")
+                    _append_bars(bars, data)
+                    cur_end = cur_end - timedelta(days=365 * years)
+                    continue
+
+                # then days
+                if remaining >= timedelta(days=1):
+                    
+                    days = max(1, remaining.days)
+                    bars = _req(cur_end, f"{days} D")
+                    _append_bars(bars, data)
+                    cur_end = cur_end - timedelta(days=days)
+                    continue
+
+                # final seconds
+                secs = int(remaining.total_seconds())
+                if secs > 0:
+                    bars = _req(cur_end, f"{secs} S")
+                    _append_bars(bars, data)
+                break
+
         df = _normalize_bars_df(pd.DataFrame(data))
 
-        # enforce user anchor for intraday (this is what makes 09:30 hourly work)
+        # ---------- hard filter to requested window ----------
+        if not df.empty:
+            df = df[(df["datetime"] >= start_date) & (df["datetime"] <= end_dt)]
+
+        # ---------- optional: trim to DB RTH window (extra safety) ----------
+        # useRTH=True should already do most of this, but it doesn't hurt.
+        if not df.empty and bar_size != "1 day":
+            df = df[
+                (df["datetime"].dt.time >= open_t) &
+                (df["datetime"].dt.time <= close_t)
+            ]
+
+        # ---------- enforce "on-the-clock" anchor alignment ----------
+        # (this is what makes 09:30 hourly / 09:30 + 30m bars work)
+        df = _filter_anchor(df, start_date, bar_size)
 
         return df
+
 
     # ---- bonds (unchanged) ----
     def get_bond_information(self, CUSID: str, exchange_name: str = None, currency: str = None) -> TickerInfo:
