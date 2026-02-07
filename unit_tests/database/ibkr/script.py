@@ -11,15 +11,16 @@ load_dotenv()
 
 
 def main():
+    
     config = Config(
         provider = "IBKR",
-        provider_config = IBKRConfig(),
+        provider_config = IBKRConfig(client_id=1),
     )
     
     db = DB(db_path = test_env_path, _config = config)
     db._hub.service
     
-    ticker = db.get_ticker("NVDA", "NASDAQ", ensure=True)
+    ticker = db.get_ticker("IBKR", "NASDAQ", ensure=True)
     print(ticker)
     
     exchange = ticker.get_exchange()
@@ -28,9 +29,14 @@ def main():
     equity = ticker.get_equity(ensure=True)
     print(equity)
 
+    now = datetime.now()
+    
     prices = equity.get_prices(start_date=datetime(2026, 1, 28), period="5 mins", ensure=True)
-    print("----- FINAL PRICES -----")
+    
+    end = datetime.now()
+    
     print(prices)
+    print(f"Total Duration: {end - now}")
 
     
 if __name__ == "__main__":

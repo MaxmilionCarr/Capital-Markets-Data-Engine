@@ -66,3 +66,30 @@ class MarketDataProvider(ABC):
         """Fetch historical price data for the given symbol."""
         pass
     '''
+    
+class FundamentalDataProvider(ABC):
+    
+    @abstractmethod
+    def connect(self):
+        """Establish connection to the data provider."""
+        pass
+
+    @abstractmethod
+    def disconnect(self):
+        """Terminate connection to the data provider."""
+        pass
+
+    @abstractmethod
+    def get_income_statement(self, symbol: str) -> pd.DataFrame:
+        """Fetch income statement data for the given symbol."""
+        pass
+    
+    @abstractmethod
+    def get_balance_sheet(self, symbol: str) -> pd.DataFrame:
+        """Fetch balance sheet data for the given symbol."""
+        pass
+    
+    @abstractmethod
+    def get_cash_flow(self, symbol: str) -> pd.DataFrame:
+        """Fetch cash flow data for the given symbol."""
+        pass

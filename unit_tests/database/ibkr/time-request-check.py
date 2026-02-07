@@ -50,6 +50,7 @@ def plot_prices(prices):
 if __name__ == "__main__":
     start_date = datetime(2024, 7, 1)
     
+    '''
     # One day test
     print("----- ONE DAY TEST -----")
     duration_day, prices_day = time_request_check(
@@ -82,6 +83,7 @@ if __name__ == "__main__":
     )
     print("----- Prices -----")
     print(prices_month)
+    '''
     
     # One year test
     print("----- ONE YEAR TEST -----")
@@ -95,9 +97,11 @@ if __name__ == "__main__":
     print(prices_year)
     
     print("----- SUMMARY OF DURATIONS -----")
+    '''
     print(f"Duration for 1 day: {duration_day}")
     print(f"Duration for 1 week: {duration_week}")
     print(f"Duration for 1 month: {duration_month}")
+    '''
     print(f"Duration for 1 year: {duration_year}")
     
     

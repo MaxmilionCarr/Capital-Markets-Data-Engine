@@ -1,7 +1,9 @@
 from datetime import datetime
 from database.data.providers.IBKR_provider import IBKRProvider, IBKRConfig
+from database.data.providers.FMP_provider import FMPProvider
 from database.data.providers.base import Provider, TickerInfo
 import pandas as pd
+import csv
 
 def main(symbols = None, exchange_name = None):
     cfg = IBKRConfig(
@@ -65,15 +67,27 @@ def test_bonds(CUSID):
     provider.disconnect()
     print("\nDisconnected cleanly ✅")
 
+def test_fundamentals(symbol, exchange_name, provider: FMPProvider):
+    print("Testing fundamentals retrieval...")
+    df = provider.get_income_statement(symbol, prev_years=3, period="annual")
+    print(df.head())
+    print("\nDataFrame columns:", df.columns.tolist())
+
+    print("\nFundamentals retrieval check passed ✅")
+    open("fundamentals_test_output.csv", "w", newline="").write(df.to_csv(index=False))
+    
+    
 
 if __name__ == "__main__":
-    print("Testing with known exchange")
+    '''
+    cfg = IBKRConfig(
+        host="127.0.0.1",
+        port=55000,      # paper / gateway port
+        client_id=1,
+    )
+
+    provider = IBKRProvider(cfg)
+    '''
     
-    main()
-    # Bond Test
-    # MIGHT HAVE TO DO THIS THROUGH THE ACTUAL API
-    # Bonds must be attached to an underlying ticker if they are to be formed
-    '''
-    bond_CUSID = "037833EB2"
-    test_bonds(bond_CUSID)
-    '''
+    test_fundamentals("AAPL", "NASDAQ", FMPProvider(api_key="P3u8bDHisw87do2yElISKK9UPWQ3qPCJ"))
+    

@@ -11,8 +11,6 @@ from .base import MarketDataProvider, Provider, TickerInfo, BondInfo, EquityInfo
 
 
 # ---------------- helpers ----------------
-from datetime import time
-
 def _hhmm_to_hms(hhmm: str) -> str:
     # "0930" -> "09:30:00"
     hhmm = hhmm.strip()
@@ -142,7 +140,6 @@ def _duration_components(total_seconds: int) -> dict[str, int]:
     seconds = remaining
     return {"years": years, "weeks": weeks, "days": days, "seconds": seconds}
 
-
 # ---------------- provider ----------------
 
 @dataclass
@@ -152,7 +149,6 @@ class IBKRConfig:
     client_id: int = 1
     timeout: int = 10
     default_currency: str = "USD"
-
 
 class IBKRProvider(MarketDataProvider):
     provider = Provider.IBKR
@@ -260,6 +256,8 @@ class IBKRProvider(MarketDataProvider):
         return tz, _parse_ibkr_hours(liquid)
 
     # ---- prices ----
+    #TODO: CACHE CONTRACT DETAILS + LIQUID HOURS MAP in a seperate function call with lru-cache
+    #TODO: WAY TO VERBOSE CUT DOWN AND TRIM (THINK ABOUT MAKING SEPERATE CLASS INSTANCES FOR TECHNICAL DATA, FUNDAMENTAL, ETC)
     def get_equity_prices(
         self,
         symbol: str,
@@ -272,16 +270,75 @@ class IBKRProvider(MarketDataProvider):
         rth_close: time | None = None,
     ) -> pd.DataFrame:
         """
-        Fast fetch strategy:
-        - 5 mins  -> 5 D chunks
-        - 30 mins -> 30 D chunks
-        - 1 hour  -> 30 D chunks
-        - 1 day   -> 1 Y chunks, remainder in D/S
-        Uses useRTH=True to avoid overnight bars.
-        Does NOT day-clip (no per-day loop).
-
-        NOTE: endDateTime passed as string to avoid tz-naive Timestamp issues in ib_async.
+        Chunk planner is hierarchy-driven: Y -> W -> D -> S
+        and chunk-size-limited (per bar_size). This preserves your original behavior:
+        - useRTH=True
+        - no per-day clipping
+        - normalize + hard filter + optional RTH trim + anchor filter
         """
+        import time as _time
+        import random as _random
+        from collections import deque as _deque
+
+        class _HistPacer:
+            """
+            Keeps you under IBKR historical pacing:
+            - avoid bursts (e.g. 6 req in 2s)
+            - avoid >60 in 10min
+            - back off when IB starts slowing responses
+            """
+            def __init__(
+                self,
+                min_interval_s: float = 0.6,   # ~2.2 req/s, safely under 6/2s rule
+                max_10min: int = 55,            # keep headroom under 60
+                adapt_threshold_s: float = 1.5, # if a request takes >1.5s, treat as throttling
+                stop_threshold_s: float = 3.0
+            ):
+                self.min_interval_s = float(min_interval_s)
+                self.max_10min = int(max_10min)
+                self.adapt_threshold_s = float(adapt_threshold_s)
+                self.stop_threshold_s = float(stop_threshold_s)
+
+                self._last_req_t = 0.0
+                self._req_times = _deque()  # timestamps of last 10 minutes
+                self._penalty_until = 0.0   # if throttled, wait until this time
+
+            def before_request(self) -> None:
+                now = _time.time()
+
+                # 1) enforce adaptive penalty window
+                if now < self._penalty_until:
+                    _time.sleep(self._penalty_until - now)
+
+                # 2) enforce min interval
+                now = _time.time()
+                dt = now - self._last_req_t
+                if dt < self.min_interval_s:
+                    _time.sleep(self.min_interval_s - dt)
+
+                # 3) enforce <= max_10min requests in rolling 10 min
+                now = _time.time()
+                cutoff = now - 600.0
+                while self._req_times and self._req_times[0] < cutoff:
+                    self._req_times.popleft()
+                if len(self._req_times) >= self.max_10min:
+                    # sleep until the oldest request exits the 10-min window (+ tiny jitter)
+                    sleep_s = (self._req_times[0] + 600.0) - now + _random.uniform(0.05, 0.20)
+                    if sleep_s > 0:
+                        _time.sleep(sleep_s)
+
+                # mark request time
+                self._last_req_t = _time.time()
+                self._req_times.append(self._last_req_t)
+
+            def after_request(self, elapsed_s: float) -> None:
+                # If IB starts responding slowly, back off a bit to avoid the “spiral”
+                if elapsed_s >= self.adapt_threshold_s:
+                    # ramp penalty proportional to slowness, cap it
+                    penalty = min(10.0, 0.5 * elapsed_s) + _random.uniform(0.05, 0.25)
+                    self._penalty_until = max(self._penalty_until, _time.time() + penalty)
+
+        pacer = _HistPacer()
 
         if not self._connected:
             raise ConnectionError("Not connected to IBKR. Call connect() first.")
@@ -297,20 +354,21 @@ class IBKRProvider(MarketDataProvider):
         contract.primaryExchange = exchange_name
         contract = self._ib.qualifyContracts(contract)[0]
 
-        # fallback RTH window (used only for optional trimming at the end)
         open_t = rth_open or time(9, 30)
         close_t = rth_close or time(16, 0)
 
         def _ib_end_str(dt: datetime) -> str:
-            # string avoids tz conversion inside ib_async
             return dt.strftime("%Y%m%d %H:%M:%S")
 
         request_counter = 0
+
         def _req(end_dt_req: datetime, duration_str: str) -> list:
             nonlocal request_counter
             request_counter += 1
-            print(f"Request Number {request_counter}: end_dt={end_dt_req}, duration={duration_str}, bar_size={bar_size}")
-            return self._ib.reqHistoricalData(
+
+            pacer.before_request()
+            t0 = _time.perf_counter()
+            bars = self._ib.reqHistoricalData(
                 contract,
                 endDateTime=_ib_end_str(end_dt_req),
                 durationStr=duration_str,
@@ -318,6 +376,13 @@ class IBKRProvider(MarketDataProvider):
                 whatToShow="TRADES",
                 useRTH=True,
             )
+            elapsed = _time.perf_counter() - t0
+            pacer.after_request(elapsed)
+
+            n = 0 if not bars else len(bars)
+            print(f"Req {request_counter}: end={end_dt_req} dur={duration_str} n={n} time_ms={elapsed*1000:.0f}")
+            return bars
+
 
         def _append_bars(bars, out: list[dict]) -> None:
             for b in bars:
@@ -332,93 +397,146 @@ class IBKRProvider(MarketDataProvider):
                     }
                 )
 
-        # -------- chunk policy --------
-        if bar_size == "5 mins":
-            chunk_td = timedelta(days=9)
-        elif bar_size in ("30 mins", "1 hour"):
-            chunk_td = timedelta(days=30)
-        else:
-            chunk_td = None  # daily handled separately
+        # -----------------------------------------
+        # Chunk sizing knobs (easy to tweak)
+        # -----------------------------------------
+        # Max window per request by bar size. This is your "chunk dependent" control.
+        MAX_CHUNK_BY_BAR: dict[str, timedelta] = {
+            "5 mins": timedelta(days=9),
+            "30 mins": timedelta(days=30),
+            "1 hour": timedelta(days=30),
+            "1 day": timedelta(days=365 * 2),  # allow multi-year daily pulls if you want
+        }
+        # Floor so the tail doesn't spam micro-requests
+        MIN_CHUNK_BY_BAR: dict[str, timedelta] = {
+            "5 mins": timedelta(days=1),
+            "30 mins": timedelta(days=1),
+            "1 hour": timedelta(days=1),
+            "1 day": timedelta(days=1),
+        }
+
+        max_chunk = MAX_CHUNK_BY_BAR.get(bar_size, timedelta(days=30))
+        min_chunk = MIN_CHUNK_BY_BAR.get(bar_size, timedelta(days=1))
+
+        # -----------------------------------------
+        # Hierarchical planner: Y -> W -> D -> S
+        # -----------------------------------------
+        def _plan_step(remaining: timedelta) -> tuple[str, int, timedelta] | None:
+            """
+            Returns (unit, n, step_td) where:
+            - step_td <= max_chunk
+            - step_td <= remaining
+            - step_td >= min_chunk  (BARRIER)
+
+            If remaining < min_chunk, returns None (stop fetching).
+            Hierarchy: Y -> W -> D -> S
+            """
+            if remaining < min_chunk:
+                return None
+
+            year_td = timedelta(days=365)
+            week_td = timedelta(days=7)
+            day_td = timedelta(days=1)
+
+            def _cap_count(remaining_td: timedelta, unit_td: timedelta, max_td: timedelta) -> int:
+                # maximum whole units we can take without exceeding remaining or max_chunk
+                return max(0, min(int(remaining_td // unit_td), int(max_td // unit_td)))
+
+            # Y
+            if max_chunk >= year_td and remaining >= year_td and min_chunk <= max_chunk:
+                n = _cap_count(remaining, year_td, max_chunk)
+                if n > 0:
+                    step_td = year_td * n
+                    if step_td >= min_chunk:
+                        return "Y", n, step_td
+
+            # W
+            '''
+            if max_chunk >= week_td and remaining >= week_td:
+                n = _cap_count(remaining, week_td, max_chunk)
+                if n > 0:
+                    step_td = week_td * n
+                    if step_td >= min_chunk:
+                        return "W", n, step_td
+            '''
+
+            # D
+            if max_chunk >= day_td and remaining >= day_td:
+                n = _cap_count(remaining, day_td, max_chunk)
+                if n > 0:
+                    step_td = day_td * n
+                    if step_td >= min_chunk:
+                        return "D", n, step_td
+            
+
+            # S (only if min_chunk is sub-day, otherwise we stop)
+            min_s = int(min_chunk.total_seconds())
+            max_s = int(max_chunk.total_seconds())
+            rem_s = int(remaining.total_seconds())
+
+            if min_s >= 1 and max_s >= min_s and rem_s >= min_s:
+                n = min(rem_s, max_s)
+                step_td = timedelta(seconds=n)
+                # step_td is guaranteed >= min_chunk here by construction
+                return "S", n, step_td
+
+            return None
+
 
         data: list[dict] = []
         cur_end = end_dt
 
-        # -------- intraday: calendar chunks + final seconds --------
-        if bar_size in ("5 mins", "30 mins", "1 hour"):
-            while cur_end > start_date:
-                remaining = cur_end - start_date
-                if remaining <= timedelta(seconds=0):
-                    break
+        while cur_end > start_date:
+            remaining = cur_end - start_date
 
-                this_td = chunk_td if remaining > chunk_td else remaining
+            plan = _plan_step(remaining)
 
-                # if the remainder is small, use seconds
-                secs = int(this_td.total_seconds())
-                if secs <= 0:
-                    break
+            # ----- NEW: tail fetch to avoid underfetch -----
+            if plan is None:
+                # We still have some time left but it's < min_chunk.
+                # Do ONE final request of size min_chunk that guarantees covering start_date.
+                if remaining.total_seconds() > 0:
+                    tail_end = start_date + min_chunk
+                    if tail_end > cur_end:
+                        tail_end = cur_end  # don't overshoot the current window end
 
-                # prefer days chunks for bigger windows (more stable than massive seconds)
-                if this_td >= timedelta(days=1):
-                    days = max(1, int(this_td.total_seconds() // 86400))
-                    bars = _req(cur_end, f"{days} D")
-                else:
-                    bars = _req(cur_end, f"{secs} S")
-
-                _append_bars(bars, data)
-                cur_end = cur_end - this_td
-
-        # -------- daily: yearly chunks + remainder --------
-        else:
-            while cur_end > start_date:
-                remaining = cur_end - start_date
-                if remaining <= timedelta(seconds=0):
-                    break
-
-                # use whole years where possible
-                if remaining >= timedelta(days=365):
-                    years = int(remaining.days // 365)
-                    years = max(1, years)
-                    bars = _req(cur_end, f"{years} Y")
+                    # duration is min_chunk (not tiny)
+                    tail_secs = int(min_chunk.total_seconds())
+                    tail_days = tail_secs // (24 * 3600)
+                    if tail_days >= 1 and bar_size == "1 day":
+                        duration_str = f"{tail_days} D"
+                    else:
+                        duration_str = f"{tail_secs} S"
+                    bars = _req(tail_end, duration_str)
                     _append_bars(bars, data)
-                    cur_end = cur_end - timedelta(days=365 * years)
-                    continue
 
-                # then days
-                if remaining >= timedelta(days=1):
-                    
-                    days = max(1, remaining.days)
-                    bars = _req(cur_end, f"{days} D")
-                    _append_bars(bars, data)
-                    cur_end = cur_end - timedelta(days=days)
-                    continue
-
-                # final seconds
-                secs = int(remaining.total_seconds())
-                if secs > 0:
-                    bars = _req(cur_end, f"{secs} S")
-                    _append_bars(bars, data)
                 break
+
+            unit, n, step_td = plan
+            duration_str = f"{n} {unit}"
+            bars = _req(cur_end, duration_str)
+            _append_bars(bars, data)
+
+            next_end = cur_end - step_td
+            if _ib_end_str(next_end) == _ib_end_str(cur_end):
+                next_end = cur_end - timedelta(seconds=1)
+            cur_end = next_end
+
+
 
         df = _normalize_bars_df(pd.DataFrame(data))
 
-        # ---------- hard filter to requested window ----------
         if not df.empty:
             df = df[(df["datetime"] >= start_date) & (df["datetime"] <= end_dt)]
 
-        # ---------- optional: trim to DB RTH window (extra safety) ----------
-        # useRTH=True should already do most of this, but it doesn't hurt.
         if not df.empty and bar_size != "1 day":
             df = df[
                 (df["datetime"].dt.time >= open_t) &
                 (df["datetime"].dt.time <= close_t)
             ]
 
-        # ---------- enforce "on-the-clock" anchor alignment ----------
-        # (this is what makes 09:30 hourly / 09:30 + 30m bars work)
         df = _filter_anchor(df, start_date, bar_size)
-
         return df
-
 
     # ---- bonds (unchanged) ----
     def get_bond_information(self, CUSID: str, exchange_name: str = None, currency: str = None) -> TickerInfo:
@@ -482,3 +600,22 @@ class IBKRProvider(MarketDataProvider):
         )
         return _normalize_bars_df(df)
 
+    # Fundamental Data
+    def get_financial_statements(self, symbol: str, exchange_name: str = None, currency: str = None) -> dict:
+        
+        contract = Contract()
+        contract.symbol = symbol
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = exchange_name
+        contract.currency = currency or self._cfg.default_currency
+        
+        
+        
+        contract = self._ib.qualifyContracts(contract)[0]
+        print(contract)
+        statements = self._ib.reqFundamentalData(contract, reportType="RESC")
+        
+        return statements
+        
+        
