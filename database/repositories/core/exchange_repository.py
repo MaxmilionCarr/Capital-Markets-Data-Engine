@@ -17,6 +17,7 @@ class Exchange:
     _id: int
     name: str
     timezone: str
+    currency: str
 
     # Normal RTH (exchange-local) time-of-day strings: 'HH:MM:SS'
     rth_open: str
@@ -43,6 +44,7 @@ class ExchangeRepository:
         exchange_id   INTEGER PRIMARY KEY,
         exchange_name TEXT NOT NULL UNIQUE,
         timezone      TEXT NOT NULL,
+        currency      TEXT NOT NULL,
         rth_open      TEXT NOT NULL,   -- '09:30:00'
         rth_close     TEXT NOT NULL    -- '16:00:00'
     """
@@ -57,7 +59,7 @@ class ExchangeRepository:
     def get_all(self) -> List[Exchange]:
         """Return all exchanges as a list of Exchange objects."""
         cur = self.connection.cursor()
-        cur.execute("SELECT exchange_id, exchange_name, timezone, rth_open, rth_close FROM exchanges")
+        cur.execute("SELECT exchange_id, exchange_name, timezone, currency, rth_open, rth_close FROM exchanges")
         rows = cur.fetchall()
         return [Exchange(*row, _hub=self.hub) for row in rows]
 
@@ -70,13 +72,13 @@ class ExchangeRepository:
         try:
             if exchange_id is not None:
                 cur.execute(
-                    "SELECT exchange_id, exchange_name, timezone, rth_open, rth_close "
+                    "SELECT exchange_id, exchange_name, timezone, currency, rth_open, rth_close "
                     "FROM exchanges WHERE exchange_id = ?",
                     (exchange_id,),
                 )
             else:
                 cur.execute(
-                    "SELECT exchange_id, exchange_name, timezone, rth_open, rth_close "
+                    "SELECT exchange_id, exchange_name, timezone, currency, rth_open, rth_close "
                     "FROM exchanges WHERE exchange_name = ?",
                     (exchange_name,),
                 )
@@ -96,6 +98,7 @@ class ExchangeRepository:
         self,
         exchange_name: str,
         timezone: str,
+        currency: str = "USD",
         *,
         rth_open: str = "09:30:00",
         rth_close: str = "16:00:00",
@@ -107,8 +110,8 @@ class ExchangeRepository:
         cur = self.connection.cursor()
         try:
             cur.execute(
-                "INSERT INTO exchanges (exchange_name, timezone, rth_open, rth_close) VALUES (?, ?, ?, ?)",
-                (exchange_name, timezone, rth_open, rth_close),
+                "INSERT INTO exchanges (exchange_name, timezone, currency, rth_open, rth_close) VALUES (?, ?, ?, ?, ?)",
+                (exchange_name, timezone, currency, rth_open, rth_close),
             )
             self.connection.commit()
             return int(cur.lastrowid)
@@ -123,6 +126,7 @@ class ExchangeRepository:
         timezone: Optional[str] = None,
         rth_open: str = "09:30:00",
         rth_close: str = "16:00:00",
+        currency: str = "USD",
     ) -> int:
         """
         Return the ID of an existing exchange with this name,
@@ -139,7 +143,7 @@ class ExchangeRepository:
         if timezone is None:
             raise ValueError("timezone must be provided when creating a new exchange")
 
-        return self.create(exchange_name=exchange_name, timezone=timezone, rth_open=rth_open, rth_close=rth_close)
+        return self.create(exchange_name=exchange_name, timezone=timezone, currency=currency, rth_open=rth_open, rth_close=rth_close)
 
     # ---------- UPDATE ----------
 
@@ -151,12 +155,13 @@ class ExchangeRepository:
         timezone: Optional[str] = None,
         rth_open: Optional[str] = None,
         rth_close: Optional[str] = None,
+        currency: Optional[str] = None,
     ) -> int:
         """
         Update fields for an exchange.
         Returns number of rows updated (0 if nothing matched).
         """
-        if exchange_name is None and timezone is None and rth_open is None and rth_close is None:
+        if exchange_name is None and timezone is None and rth_open is None and rth_close is None and currency is None:
             raise ValueError("Must provide at least one field to update")
 
         fields, values = [], []
@@ -166,6 +171,9 @@ class ExchangeRepository:
         if timezone is not None:
             fields.append("timezone = ?")
             values.append(timezone)
+        if currency is not None:
+            fields.append("currency = ?")
+            values.append(currency)
         if rth_open is not None:
             fields.append("rth_open = ?")
             values.append(rth_open)

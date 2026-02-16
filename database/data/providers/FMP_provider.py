@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import requests
 
 from dataclasses import dataclass
@@ -8,6 +9,10 @@ from typing import Literal, Optional
 import pandas as pd
 
 from .base import FundamentalDataProvider, TickerInfo, EquityInfo
+
+@dataclass
+class FMPConfig:
+    pass
 
 class FMPProvider(FundamentalDataProvider):
     def __init__(self, api_key: str):
@@ -21,8 +26,7 @@ class FMPProvider(FundamentalDataProvider):
     def disconnect(self):
         pass
     
-    def get_income_statement(self, symbol: str, prev_years: int, period: str) -> pd.DataFrame:
-
+    def get_income_statement(self, symbol: str, prev_years: int, period: str) -> json:
         extension = f"income-statement?symbol={symbol}&limit={prev_years}&period={period}&apikey={self.api_key}"
         url = self.base_url + extension
         
@@ -33,11 +37,32 @@ class FMPProvider(FundamentalDataProvider):
         data = response.json()
         if not data:
             raise Exception(f"No income statement data found for {symbol}")
-        return pd.DataFrame(data)
+        return data
     
-    def get_balance_sheet(self, symbol: str, prev_years: int) -> pd.DataFrame:
-        pass
+    def get_balance_sheet(self, symbol: str, prev_years: int, period: str) -> pd.DataFrame:
+        extension = f"balance-sheet-statement?symbol={symbol}&limit={prev_years}&period={period}&apikey={self.api_key}"
+        url = self.base_url + extension
+        
+        response = requests.get(url)
+        if response.status_code != 200:
+            raise Exception(f"Failed to fetch balance sheet for {symbol}: {response.text}")
+        
+        data = response.json()
+        if not data:
+            raise Exception(f"No balance sheet data found for {symbol}")
+        return data
     
-    def get_cash_flow(self, symbol):
-        pass
+    def get_cash_flow(self, symbol: str, prev_years: int, period: str) -> pd.DataFrame:
+        extension = f"cash-flow-statement?symbol={symbol}&limit={prev_years}&period={period}&apikey={self.api_key}"
+        url = self.base_url + extension
+        
+        response = requests.get(url)
+        if response.status_code != 200:
+            raise Exception(f"Failed to fetch cash flow for {symbol}: {response.text}")
+        
+        data = response.json()
+        if not data:
+            raise Exception(f"No cash flow data found for {symbol}")
+        return data
+
         

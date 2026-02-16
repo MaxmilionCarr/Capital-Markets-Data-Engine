@@ -10,7 +10,8 @@ import pandas as pd
 from typing_extensions import Literal
 
 from database.db import Hub
-
+from database.repositories.fundamental_data.statements_repository import Statement
+STATEMENTS = Literal["income_statement", "balance_sheet", "cash_flow"]
 
 @dataclass
 class Ticker:
@@ -20,7 +21,6 @@ class Ticker:
 
     symbol: str
     full_name: str
-    currency: str
 
     _source: str
     _hub: Hub
@@ -42,6 +42,15 @@ class Ticker:
         if equity is None and ensure:
             equity = equity_repo.get_or_create_ensure(self)
         return equity
+    
+    def get_statements(self, statement_type: str, period: STATEMENTS, look_back: int = 0, *, ensure: bool = False) -> Optional[List[Statement]]:
+        """Return statements of a given type and period for this ticker."""
+        statements_repo = self._hub.statements_repo
+        
+        if ensure:
+            return statements_repo.ensure_statements(ticker_id=self._id, statement_type=statement_type, period=period, count=look_back)
+        else:
+            return statements_repo.get_statements(ticker_id=self._id, statement_type=statement_type, period=period, count=look_back)
 
 class TickerRepository:
     """
@@ -53,7 +62,6 @@ class TickerRepository:
         exchange_id INTEGER NOT NULL,
         symbol TEXT NOT NULL,
         full_name TEXT,
-        currency TEXT NOT NULL,
         source TEXT NOT NULL,
         UNIQUE(symbol, exchange_id),
         FOREIGN KEY (exchange_id) REFERENCES exchanges(exchange_id) ON DELETE CASCADE,
@@ -82,14 +90,20 @@ class TickerRepository:
 
     def get_all(self) -> List[Ticker]:
         cur = self.connection.cursor()
-        cur.execute("SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, currency, source FROM tickers")
+        cur.execute("SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, source FROM tickers")
         rows = cur.fetchall()
         return [Ticker(*row, _hub=self.hub) for row in rows]
+    
+    def get_symbol_by_id(self, ticker_id: int) -> Optional[str]:
+        cur = self.connection.cursor()
+        cur.execute("SELECT symbol FROM tickers WHERE ticker_id = ?", (ticker_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
 
     def get_by_symbol(self, symbol: str) -> List[Ticker]:
         cur = self.connection.cursor()
         cur.execute(
-            "SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, currency, source "
+            "SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, source "
             "FROM tickers WHERE symbol = ?",
             (symbol,),
         )
@@ -107,7 +121,7 @@ class TickerRepository:
 
         if ticker_id is not None:
             cur.execute(
-                "SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, currency, source "
+                "SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, source "
                 "FROM tickers WHERE ticker_id = ? AND exchange_id = ?",
                 (ticker_id, exchange_id),
             )
@@ -115,7 +129,7 @@ class TickerRepository:
             return Ticker(*row, _hub=self.hub) if row else None
 
         cur.execute(
-            "SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, currency, source "
+            "SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, source "
             "FROM tickers WHERE symbol = ? AND exchange_id = ?",
             (symbol, exchange_id),
         )
@@ -125,7 +139,7 @@ class TickerRepository:
     def get_by_exchange(self, exchange_id: int) -> List[Ticker]:
         cur = self.connection.cursor()
         cur.execute(
-            "SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, currency, source "
+            "SELECT ticker_id, underlying_id, exchange_id, symbol, full_name, source "
             "FROM tickers WHERE exchange_id = ?",
             (exchange_id,),
         )
@@ -134,18 +148,18 @@ class TickerRepository:
 
     # ---------- CREATE ----------
 
-    def create(self, symbol: str, exchange_id: int, *, currency: str, full_name: str | None = None, source: str) -> int:
+    def create(self, symbol: str, exchange_id: int, *, full_name: str | None = None, source: str) -> int:
         cur = self.connection.cursor()
         underlying_id = self._get_or_create_underlying(symbol)
         cur.execute(
-            "INSERT INTO tickers (underlying_id, exchange_id, symbol, full_name, currency, source) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (underlying_id, exchange_id, symbol, full_name, currency, source),
+            "INSERT INTO tickers (underlying_id, exchange_id, symbol, full_name, source) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (underlying_id, exchange_id, symbol, full_name, source),
         )
         self.connection.commit()
         return int(cur.lastrowid)
 
-    def get_or_create(self, symbol: str, exchange_id: int, *, currency: str, full_name: str | None = None, source: str) -> Ticker:
+    def get_or_create(self, symbol: str, exchange_id: int, *, full_name: str | None = None, source: str) -> Ticker:
         """
         Return the ticker where (symbol, exchange_id) match, else create it.
         """
@@ -153,7 +167,7 @@ class TickerRepository:
         if existing:
             return existing
 
-        ticker_id = self.create(symbol=symbol, exchange_id=exchange_id, currency=currency, full_name=full_name, source=source)
+        ticker_id = self.create(symbol=symbol, exchange_id=exchange_id, full_name=full_name, source=source)
         out = self.get_info(exchange_id=exchange_id, ticker_id=ticker_id)
         if out is None:
             raise sql.Error("Failed to create ticker")
@@ -179,7 +193,7 @@ class TickerRepository:
         except sql.Error:
             # Exchange missing: use provider to get timezone for this exchange_name.
             # We'll fetch ticker details with exchange_name constraint to get timeZoneId.
-            tinfo = self.hub._service.fetch_ticker(symbol=symbol, exchange_name=exchange_name)
+            tinfo = self.hub.market_data_service.fetch_ticker(symbol=symbol, exchange_name=exchange_name)
             if not tinfo:
                 print("No ticker with that exchange exists (cannot create exchange)")
                 return None
@@ -187,6 +201,7 @@ class TickerRepository:
             ensured_exchange_id = self.hub.exchange_repo.get_or_create(
                 exchange_name=exchange_name,
                 timezone=tinfo.timezone,
+                currency=tinfo.currency,
                 rth_open=tinfo.rth_open or "09:30:00",
                 rth_close=tinfo.rth_close or "16:00:00",
             )
@@ -209,7 +224,7 @@ class TickerRepository:
                 return c
 
         # --- 3) Fetch from provider and insert ticker ---
-        ticker = self.hub._service.fetch_ticker(symbol=symbol, exchange_name=exchange_name)
+        ticker = self.hub.market_data_service.fetch_ticker(symbol=symbol, exchange_name=exchange_name)
         if not ticker:
             print("No ticker with that exchange exists")
             return None
@@ -217,7 +232,6 @@ class TickerRepository:
         ticker_id = self.create(
             symbol=ticker.symbol,
             exchange_id=ensured_exchange_id,
-            currency=ticker.currency,
             full_name=ticker.full_name,
             source=ticker.provider.name,
         )
@@ -234,14 +248,13 @@ class TickerRepository:
 
     # ---------- UPSERT ----------
 
-    def upsert(self, symbol: str, exchange_id: int, *, currency: str, full_name: str | None = None, source: str) -> int:
+    def upsert(self, symbol: str, exchange_id: int, *, full_name: str | None = None, source: str) -> int:
         existing = self.get_info(exchange_id=exchange_id, symbol=symbol)
         if existing:
             self.update(
                 existing._id,
                 symbol=symbol,
                 exchange_id=exchange_id,
-                currency=currency,
                 full_name=full_name,
                 source=source,
             )
@@ -249,7 +262,6 @@ class TickerRepository:
         return self.create(
             symbol=symbol,
             exchange_id=exchange_id,
-            currency=currency,
             full_name=full_name,
             source=source,
         )
@@ -265,7 +277,7 @@ class TickerRepository:
             if existing:
                 return existing
 
-        ticker = self.hub._service.fetch_ticker(symbol=symbol, exchange_name=exchange_name)
+        ticker = self.hub.market_data_service.fetch_ticker(symbol=symbol, exchange_name=exchange_name)
         if not ticker:
             print("No ticker with that exchange exists")
             return None
@@ -280,7 +292,6 @@ class TickerRepository:
         self.upsert(
             symbol=ticker.symbol,
             exchange_id=ensured_exchange_id,
-            currency=ticker.currency,
             full_name=ticker.full_name,
             source=ticker.provider.name,
         )
@@ -295,12 +306,11 @@ class TickerRepository:
         *,
         symbol: str | None = None,
         exchange_id: int | None = None,
-        currency: str | None = None,
         full_name: str | None = None,
         description: str | None = None,
         source: str | None = None,
     ) -> int:
-        if not (symbol or exchange_id or currency or full_name or description or source):
+        if not (symbol or exchange_id or full_name or description or source):
             raise ValueError("Must provide at least one field to update")
 
         cur = self.connection.cursor()
@@ -312,9 +322,6 @@ class TickerRepository:
         if exchange_id is not None:
             fields.append("exchange_id = ?")
             values.append(exchange_id)
-        if currency is not None:
-            fields.append("currency = ?")
-            values.append(currency)
         if full_name is not None:
             fields.append("full_name = ?")
             values.append(full_name)
@@ -497,8 +504,10 @@ class EquitiesRepository:
         if existing:
             return ticker
         
+        exchange =ticker.get_exchange()
+
         print("Tried to fetch equity info from service")
-        equity = self.hub.service.fetch_equity(ticker.symbol, ticker.exchange_name, ticker.currency)
+        equity = self.hub.market_data_service.fetch_equity(ticker.symbol, ticker.exchange_name, exchange.currency)
         self.create(
             ticker._id,
             sector = equity.sector,

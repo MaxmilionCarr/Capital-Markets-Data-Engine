@@ -273,7 +273,7 @@ class EquityPricesRepository:
             rth_open = _parse_hms(ex.rth_open) if ex and ex.rth_open else None
             rth_close = _parse_hms(ex.rth_close) if ex and ex.rth_close else None
 
-            df = self.hub.service.fetch_equity_prices(
+            df = self.hub.market_data_service.fetch_equity_prices(
                 equity._ticker.symbol,
                 equity._ticker.get_exchange().name,
                 start_date=fetch_start,

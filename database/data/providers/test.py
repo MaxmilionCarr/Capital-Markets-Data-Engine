@@ -4,6 +4,9 @@ from database.data.providers.FMP_provider import FMPProvider
 from database.data.providers.base import Provider, TickerInfo
 import pandas as pd
 import csv
+import os
+
+api_key = os.getenv("api_key")
 
 def main(symbols = None, exchange_name = None):
     cfg = IBKRConfig(
@@ -89,5 +92,5 @@ if __name__ == "__main__":
     provider = IBKRProvider(cfg)
     '''
     
-    test_fundamentals("AAPL", "NASDAQ", FMPProvider(api_key="P3u8bDHisw87do2yElISKK9UPWQ3qPCJ"))
+    test_fundamentals("AAPL", "NASDAQ", FMPProvider(api_key=api_key))
     

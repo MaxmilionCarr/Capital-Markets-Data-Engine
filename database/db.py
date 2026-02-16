@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass, field
 from functools import cached_property
 
+from database.data.providers.FMP_provider import FMPConfig, FMPProvider
 from database.data.providers.IBKR_provider import IBKRConfig, IBKRProvider
 #from .data.services.IBKR_service import IBKRService
 
@@ -22,8 +23,10 @@ except Exception as e:
 
 @dataclass
 class Config:
-    provider: str = "IBKR"
-    provider_config: dict[str, Any] = field(default_factory=dict)
+    market_data_provider: str = "IBKR"
+    market_data_provider_config: dict[str, Any] = field(default_factory=dict)
+    fundamental_data_provider: str = "FMP"
+    fundamental_data_provider_config: dict[str, Any] = field(default_factory=dict)
     # policy knobs you’ll want soon:
     allow_ensure: bool = True
     overwrite_priority: tuple[str, ...] = ("IBKR", "YFINANCE")  # higher wins
@@ -34,24 +37,40 @@ class Hub:
         self.config = config
         self.conn.execute("PRAGMA foreign_keys = ON")
         
-        self._service = None
+        self._market_data_service = None
+        self._fundamental_data_service = None
+
         self._exchange_repo = None
         self._ticker_repo = None
         self._equities_repo = None
-        
         self._equity_prices_repo = None
+        
+        self._statements_repo = None
     
     @property
-    def service(self):
-        if self._service is None:
-            if self.config.provider == "IBKR":
+    def market_data_service(self):
+        if self._market_data_service is None:
+
+            if self.config.market_data_provider == "IBKR":
                 from database.data.services.IBKR_service import IBKRService
-                cfg = IBKRConfig()
-                provider = IBKRProvider()
-                self._service = IBKRService(provider)
+                cfg = IBKRConfig(**self.config.market_data_provider_config)
+                provider = IBKRProvider(cfg)
+                self._market_data_service = IBKRService(provider)
             else:
-                raise ValueError(f"Unknown provider {self.config.provider}")
-        return self._service
+                raise ValueError(f"Unknown provider {self.config.market_data_provider}")
+        return self._market_data_service
+    
+    @property
+    def fundamental_data_service(self):
+        if self._fundamental_data_service is None:
+            if self.config.fundamental_data_provider == "FMP":
+                from database.data.services.FMP_service import FMPService
+                cfg = FMPConfig(**self.config.fundamental_data_provider_config)
+                provider = FMPProvider(api_key = os.getenv("api_key"))
+                self._fundamental_data_service = FMPService(provider)
+            else:
+                raise ValueError(f"Unknown provider {self.config.fundamental_data_provider}")
+        return self._fundamental_data_service
 
     @property
     def exchange_repo(self):
@@ -80,6 +99,13 @@ class Hub:
         if self._equity_prices_repo is None:
             self._equity_prices_repo = EquityPricesRepository(self.conn, hub=self)
         return self._equity_prices_repo
+    
+    @property
+    def statements_repo(self):
+        from .repositories.fundamental_data.statements_repository import StatementRepository
+        if self._statements_repo is None:
+            self._statements_repo = StatementRepository(self.conn, hub=self)
+        return self._statements_repo
     
     '''
     @property
@@ -160,6 +186,7 @@ class DataBase:
                         exchange_id INTEGER PRIMARY KEY,
                         exchange_name TEXT NOT NULL UNIQUE,
                         timezone TEXT NOT NULL,
+                        currency TEXT NOT NULL,
                         rth_open TEXT NOT NULL,
                         rth_close TEXT NOT NULL
                     )''')
@@ -172,6 +199,7 @@ class DataBase:
                         symbol TEXT NOT NULL UNIQUE
                     );''')
         
+        # Change this so that tickers doesn't need exchange, equities instead should
         cur.execute('''CREATE TABLE IF NOT EXISTS tickers (
                         ticker_id INTEGER PRIMARY KEY,
                         underlying_id INTEGER NOT NULL,
@@ -179,7 +207,6 @@ class DataBase:
 
                         symbol TEXT NOT NULL,
                         full_name TEXT,
-                        currency TEXT NOT NULL,
                         
                         source TEXT NOT NULL,
 
@@ -245,7 +272,18 @@ class DataBase:
         
         # TODO: 
         
-        # -- Bond Table --
+        # -- Statement Tables --
+
+        cur.execute('''CREATE TABLE IF NOT EXISTS statements (
+                    id INTEGER PRIMARY KEY,
+                    ticker_id INTEGER NOT NULL REFERENCES tickers(ticker_id) ON DELETE CASCADE,
+                    type TEXT NOT NULL,  -- 'income_statement', 'balance_sheet', 'cash_flow'
+                    period TEXT NOT NULL,  -- 'annual' or 'quarterly'
+                    fiscal_date DATETIME NOT NULL,
+                    statement JSON NOT NULL,
+                    UNIQUE(ticker_id, type, period, fiscal_date)
+                    )''')
+
         
 
 
