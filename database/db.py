@@ -206,7 +206,18 @@ class DataBase:
                         FOREIGN KEY (ticker_id) REFERENCES tickers(ticker_id) ON DELETE CASCADE
                     );''')
         
-        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices (
+        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_daily (
+                        equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
+                        datetime DATETIME NOT NULL,
+                        open REAL,
+                        high REAL,
+                        low REAL,
+                        close REAL NOT NULL,
+                        volume INTEGER,
+                        PRIMARY KEY (equity_id, datetime)
+                    )''')
+
+        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_hourly (
                         equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
                         datetime DATETIME NOT NULL,
                         open REAL,
@@ -217,7 +228,20 @@ class DataBase:
                         PRIMARY KEY (equity_id, datetime)
                     )''')
         
-        cur.execute('''CREATE INDEX IF NOT EXISTS idx_prices_equity_time ON equity_prices (equity_id, datetime)''')
+        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_five_minute (
+                        equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
+                        datetime DATETIME NOT NULL,
+                        open REAL,
+                        high REAL,
+                        low REAL,
+                        close REAL NOT NULL,
+                        volume INTEGER,
+                        PRIMARY KEY (equity_id, datetime)
+                    )''')
+        
+        cur.execute('''CREATE INDEX IF NOT EXISTS idx_prices_equity_time_daily ON equity_prices_daily (equity_id, datetime)''')
+        cur.execute('''CREATE INDEX IF NOT EXISTS idx_prices_equity_time_hourly ON equity_prices_hourly (equity_id, datetime)''')
+        cur.execute('''CREATE INDEX IF NOT EXISTS idx_prices_equity_time_five_minute ON equity_prices_five_minute (equity_id, datetime)''')
         
         # TODO: 
         
