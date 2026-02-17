@@ -13,14 +13,10 @@ load_dotenv()
 def time_request_check(ticker_symbol="AAPL", exchange_name="NASDAQ", start_date=None, end_date=None):
     
     start = datetime.now()
+
     
-    config = Config(
-        provider = "IBKR",
-        provider_config = IBKRConfig(client_id=2),
-    )
-    
-    db = DB(db_path = test_env_path, _config = config)
-    db._hub.service
+    db = DB(db_path = test_env_path)
+    db._hub.market_data_service
     
     ticker = db.get_ticker(ticker_symbol, exchange_name, ensure=True)
     print(ticker)
