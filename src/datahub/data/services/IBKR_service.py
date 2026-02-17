@@ -1,6 +1,6 @@
 from typing import List, Literal
-from database.data.providers.IBKR_provider import IBKRProvider
-from database.data.providers.base import TickerInfo, EquityInfo
+from datahub.data.providers.IBKR_provider import IBKRProvider
+from datahub.data.providers.base import TickerInfo, EquityInfo
 import pandas as pd
 from datetime import datetime, time, timedelta
 

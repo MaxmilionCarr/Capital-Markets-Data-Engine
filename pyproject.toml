@@ -1,9 +1,39 @@
 [build-system]
-requires = ["setuptools>=68", "wheel", "pybind11>=2.10"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "optionpricer"
+name = "financial-datahub"
 version = "0.1.0"
-description = "C++ pricers via pybind11"
-requires-python = ">=3.9"
+description = "Reusable datahub package for financial data ingestion and storage"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = { text = "Proprietary" }
+authors = [{ name = "Max Carr" }]
+
+# Keep runtime deps minimal. Put the big list into extras/constraints (see below).
+dependencies = [
+  "pandas>=2.0",
+  "requests>=2.0",
+  "python-dotenv>=1.0",
+  "peewee>=3.0",
+]
+
+[project.optional-dependencies]
+ibkr = [
+  "ib_async>=2.0.0",
+  "ib-insync>=0.9.0",
+]
+market = [
+  "yfinance>=0.2.0",
+]
+dev = [
+  "pytest>=7.0",
+  "ruff>=0.5",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

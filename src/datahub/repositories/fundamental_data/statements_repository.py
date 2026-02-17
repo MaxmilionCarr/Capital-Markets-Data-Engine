@@ -5,7 +5,7 @@ import json
 import sqlite3 as sql
 from typing import Any, Literal, List
 
-from database.db import Hub
+from datahub.db import Hub
 
 
 # Statement "type" (what kind of statement)

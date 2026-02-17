@@ -7,8 +7,8 @@ import os
 from dataclasses import dataclass, field
 from functools import cached_property
 
-from database.data.providers.FMP_provider import FMPConfig, FMPProvider
-from database.data.providers.IBKR_provider import IBKRConfig, IBKRProvider
+from datahub.data.providers.FMP_provider import FMPConfig, FMPProvider
+from datahub.data.providers.IBKR_provider import IBKRConfig, IBKRProvider
 #from .data.services.IBKR_service import IBKRService
 
 try:
@@ -52,7 +52,7 @@ class Hub:
         if self._market_data_service is None:
 
             if self.config.market_data_provider == "IBKR":
-                from database.data.services.IBKR_service import IBKRService
+                from datahub.data.services.IBKR_service import IBKRService
                 cfg = IBKRConfig(**self.config.market_data_provider_config)
                 provider = IBKRProvider(cfg)
                 self._market_data_service = IBKRService(provider)
@@ -64,7 +64,7 @@ class Hub:
     def fundamental_data_service(self):
         if self._fundamental_data_service is None:
             if self.config.fundamental_data_provider == "FMP":
-                from database.data.services.FMP_service import FMPService
+                from datahub.data.services.FMP_service import FMPService
                 cfg = FMPConfig(**self.config.fundamental_data_provider_config)
                 provider = FMPProvider(api_key = os.getenv("api_key"))
                 self._fundamental_data_service = FMPService(provider)

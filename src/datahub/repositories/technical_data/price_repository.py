@@ -6,8 +6,8 @@ from typing import Literal
 
 import pandas as pd
 
-from database.db import Hub
-from database.repositories.instruments.ticker_repository import Equity
+from datahub.db import Hub
+from datahub.repositories.instruments.ticker_repository import Equity
 
 periods = {"5 mins", "1 hour", "1 day"}
 

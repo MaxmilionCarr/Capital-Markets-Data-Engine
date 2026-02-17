@@ -1,7 +1,7 @@
 from datetime import datetime
-from database.data.providers.IBKR_provider import IBKRProvider, IBKRConfig
-from database.data.providers.FMP_provider import FMPProvider
-from database.data.providers.base import Provider, TickerInfo
+from datahub.data.providers.IBKR_provider import IBKRProvider, IBKRConfig
+from datahub.data.providers.FMP_provider import FMPProvider
+from datahub.data.providers.base import Provider, TickerInfo
 import pandas as pd
 import csv
 import os
