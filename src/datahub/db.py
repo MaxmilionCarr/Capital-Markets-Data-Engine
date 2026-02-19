@@ -2,7 +2,7 @@
 # FIXME: need to handle connection closing better in handling duplicate creations
 from __future__ import annotations
 import sqlite3 as sql
-from typing import Any, List
+from typing import Any, List, Literal
 import os
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -23,7 +23,7 @@ except Exception as e:
 
 @dataclass
 class Config:
-    market_data_provider: str = "IBKR"
+    market_data_provider: Literal["IBKR", "YFINANCE"] = "IBKR"
     market_data_provider_config: dict[str, Any] = field(default_factory=dict)
     fundamental_data_provider: str = "FMP"
     fundamental_data_provider_config: dict[str, Any] = field(default_factory=dict)
