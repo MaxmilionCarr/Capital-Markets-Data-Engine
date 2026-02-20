@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3 as sql
 from dataclasses import dataclass
 from typing import Optional, List
-from datahub.db import Hub
+from database_connector.db import Hub
 
 EXIT_SUCCESS = 1
 EXIT_FAILURE = 0

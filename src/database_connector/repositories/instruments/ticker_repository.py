@@ -9,8 +9,8 @@ from typing import Optional, List
 import pandas as pd
 from typing_extensions import Literal
 
-from datahub.db import Hub
-from datahub.repositories.fundamental_data.statements_repository import Statement
+from database_connector.db import Hub
+from database_connector.repositories.fundamental_data.statements_repository import Statement
 STATEMENTS = Literal["income_statement", "balance_sheet", "cash_flow"]
 
 @dataclass

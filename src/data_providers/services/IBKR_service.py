@@ -1,14 +1,14 @@
 from typing import List, Literal
-from datahub.data.providers.IBKR_provider import IBKRProvider
-from datahub.data.providers.base import TickerInfo, EquityInfo
+from data_providers.clients.IBKR_client import IBKRConfig, IBKRProvider
+from data_providers.clients.base import TickerInfo, EquityInfo
 import pandas as pd
 from datetime import datetime, time, timedelta
 
 
 
 class IBKRService:
-    def __init__(self, IBKRProvider: IBKRProvider):
-        self._client = IBKRProvider
+    def __init__(self, config: IBKRConfig):
+        self._client = IBKRProvider(config)
 
     # Service Functions
     def fetch_ticker(self, symbol: str, exchange_name: str = None) -> TickerInfo | List[TickerInfo]:

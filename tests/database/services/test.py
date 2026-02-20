@@ -1,4 +1,4 @@
-from datahub.db import DB
+from database_connector.db import DB
 from dotenv import load_dotenv
 import os
 import pandas as pd

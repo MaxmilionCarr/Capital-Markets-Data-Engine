@@ -1,6 +1,6 @@
 from typing import List, Literal
-from datahub.data.providers.FMP_provider import FMPProvider
-from datahub.data.providers.base import TickerInfo, EquityInfo
+from data_providers.clients.FMP_client import FMPProvider
+from data_providers.clients.base import TickerInfo, EquityInfo
 import pandas as pd
 from datetime import datetime, time, timedelta
 
