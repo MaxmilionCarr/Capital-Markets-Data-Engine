@@ -15,11 +15,9 @@ This repository focuses on data engineering for research, not automated trading 
 Features
 
 Multi-source data fetching
-Primary source: IBKR TWS/Gateway API (paper trading).
-Fallback source: yfinance.
+IBKR TWS/Gateway API, FMP REST API
 
 Structured database schema
-
 Exchanges, Markets and Tickers
 
 Equities and Bonds specific tables
@@ -35,4 +33,4 @@ These classes enforce type checking and input validation for reliable database o
 Extendable for research
 The design allows you to later incorporate financial statements, DCF models or other analytics without major refactoring.
 
-*Still in production*
+*Still Being Updated*
