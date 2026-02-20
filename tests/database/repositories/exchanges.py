@@ -1,4 +1,4 @@
-from database.db import DB
+from database_connector import DB
 import sqlite3 as sql
 import os
 import pandas as pd

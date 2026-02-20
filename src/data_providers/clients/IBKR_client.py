@@ -6,6 +6,9 @@ from typing import Literal, Optional
 
 import pandas as pd
 from ib_async import IB, Contract
+import time as _time
+import random as _random
+from collections import deque as _deque
 
 from .base import MarketDataProvider, Provider, TickerInfo, BondInfo, EquityInfo
 
@@ -140,6 +143,64 @@ def _duration_components(total_seconds: int) -> dict[str, int]:
     seconds = remaining
     return {"years": years, "weeks": weeks, "days": days, "seconds": seconds}
 
+class _HistPacer:
+    """
+    Keeps you under IBKR historical pacing:
+    - avoid bursts (e.g. 6 req in 2s)
+    - avoid >60 in 10min
+    - back off when IB starts slowing responses
+    """
+    def __init__(
+        self,
+        min_interval_s: float = 0.6,   # ~2.2 req/s, safely under 6/2s rule
+        max_10min: int = 55,            # keep headroom under 60
+        adapt_threshold_s: float = 1.5, # if a request takes >1.5s, treat as throttling
+        stop_threshold_s: float = 3.0
+    ):
+        self.min_interval_s = float(min_interval_s)
+        self.max_10min = int(max_10min)
+        self.adapt_threshold_s = float(adapt_threshold_s)
+        self.stop_threshold_s = float(stop_threshold_s)
+
+        self._last_req_t = 0.0
+        self._req_times = _deque()  # timestamps of last 10 minutes
+        self._penalty_until = 0.0   # if throttled, wait until this time
+
+    def before_request(self) -> None:
+        now = _time.time()
+
+        # 1) enforce adaptive penalty window
+        if now < self._penalty_until:
+            _time.sleep(self._penalty_until - now)
+
+        # 2) enforce min interval
+        now = _time.time()
+        dt = now - self._last_req_t
+        if dt < self.min_interval_s:
+            _time.sleep(self.min_interval_s - dt)
+
+        # 3) enforce <= max_10min requests in rolling 10 min
+        now = _time.time()
+        cutoff = now - 600.0
+        while self._req_times and self._req_times[0] < cutoff:
+            self._req_times.popleft()
+        if len(self._req_times) >= self.max_10min:
+            # sleep until the oldest request exits the 10-min window (+ tiny jitter)
+            sleep_s = (self._req_times[0] + 600.0) - now + _random.uniform(0.05, 0.20)
+            if sleep_s > 0:
+                _time.sleep(sleep_s)
+
+        # mark request time
+        self._last_req_t = _time.time()
+        self._req_times.append(self._last_req_t)
+
+    def after_request(self, elapsed_s: float) -> None:
+        # If IB starts responding slowly, back off a bit to avoid the “spiral”
+        if elapsed_s >= self.adapt_threshold_s:
+            # ramp penalty proportional to slowness, cap it
+            penalty = min(10.0, 0.5 * elapsed_s) + _random.uniform(0.05, 0.25)
+            self._penalty_until = max(self._penalty_until, _time.time() + penalty)
+
 # ---------------- provider ----------------
 
 @dataclass
@@ -148,7 +209,11 @@ class IBKRConfig:
     port: int = 55000
     client_id: int = 1
     timeout: int = 10
-    default_currency: str = "USD"
+
+    reconnect_ttl_seconds: Optional[float] = 10.0
+    auto_reconnect: bool = True
+
+    pacer: Optional[_HistPacer] = _HistPacer()
 
 class IBKRProvider(MarketDataProvider):
     provider = Provider.IBKR
@@ -224,7 +289,11 @@ class IBKRProvider(MarketDataProvider):
         contract.secType = "STK"
         contract.exchange = "SMART"
         contract.primaryExchange = exchange_name
-        contract.currency = currency or self._cfg.default_currency
+        if currency is None:
+            # IBKR requires currency for contract qualification; default to USD if not provided
+            contract.currency = "USD"
+        else:
+            contract.currency = currency
 
         details = self._ib.reqContractDetails(contract)
         if not details:
@@ -276,69 +345,8 @@ class IBKRProvider(MarketDataProvider):
         - no per-day clipping
         - normalize + hard filter + optional RTH trim + anchor filter
         """
-        import time as _time
-        import random as _random
-        from collections import deque as _deque
 
-        class _HistPacer:
-            """
-            Keeps you under IBKR historical pacing:
-            - avoid bursts (e.g. 6 req in 2s)
-            - avoid >60 in 10min
-            - back off when IB starts slowing responses
-            """
-            def __init__(
-                self,
-                min_interval_s: float = 0.6,   # ~2.2 req/s, safely under 6/2s rule
-                max_10min: int = 55,            # keep headroom under 60
-                adapt_threshold_s: float = 1.5, # if a request takes >1.5s, treat as throttling
-                stop_threshold_s: float = 3.0
-            ):
-                self.min_interval_s = float(min_interval_s)
-                self.max_10min = int(max_10min)
-                self.adapt_threshold_s = float(adapt_threshold_s)
-                self.stop_threshold_s = float(stop_threshold_s)
-
-                self._last_req_t = 0.0
-                self._req_times = _deque()  # timestamps of last 10 minutes
-                self._penalty_until = 0.0   # if throttled, wait until this time
-
-            def before_request(self) -> None:
-                now = _time.time()
-
-                # 1) enforce adaptive penalty window
-                if now < self._penalty_until:
-                    _time.sleep(self._penalty_until - now)
-
-                # 2) enforce min interval
-                now = _time.time()
-                dt = now - self._last_req_t
-                if dt < self.min_interval_s:
-                    _time.sleep(self.min_interval_s - dt)
-
-                # 3) enforce <= max_10min requests in rolling 10 min
-                now = _time.time()
-                cutoff = now - 600.0
-                while self._req_times and self._req_times[0] < cutoff:
-                    self._req_times.popleft()
-                if len(self._req_times) >= self.max_10min:
-                    # sleep until the oldest request exits the 10-min window (+ tiny jitter)
-                    sleep_s = (self._req_times[0] + 600.0) - now + _random.uniform(0.05, 0.20)
-                    if sleep_s > 0:
-                        _time.sleep(sleep_s)
-
-                # mark request time
-                self._last_req_t = _time.time()
-                self._req_times.append(self._last_req_t)
-
-            def after_request(self, elapsed_s: float) -> None:
-                # If IB starts responding slowly, back off a bit to avoid the “spiral”
-                if elapsed_s >= self.adapt_threshold_s:
-                    # ramp penalty proportional to slowness, cap it
-                    penalty = min(10.0, 0.5 * elapsed_s) + _random.uniform(0.05, 0.25)
-                    self._penalty_until = max(self._penalty_until, _time.time() + penalty)
-
-        pacer = _HistPacer()
+        pacer = self._cfg.pacer
 
         if not self._connected:
             raise ConnectionError("Not connected to IBKR. Call connect() first.")
@@ -402,7 +410,7 @@ class IBKRProvider(MarketDataProvider):
         # -----------------------------------------
         # Max window per request by bar size. This is your "chunk dependent" control.
         MAX_CHUNK_BY_BAR: dict[str, timedelta] = {
-            "5 mins": timedelta(days=9),
+            "5 mins": timedelta(days=21),
             "30 mins": timedelta(days=30),
             "1 hour": timedelta(days=30),
             "1 day": timedelta(days=365 * 2),  # allow multi-year daily pulls if you want
@@ -459,7 +467,6 @@ class IBKRProvider(MarketDataProvider):
                     if step_td >= min_chunk:
                         return "W", n, step_td
             '''
-
             # D
             if max_chunk >= day_td and remaining >= day_td:
                 n = _cap_count(remaining, day_td, max_chunk)
@@ -544,7 +551,7 @@ class IBKRProvider(MarketDataProvider):
         contract.secType = "BOND"
         contract.symbol = CUSID
         contract.exchange = "SMART"
-        contract.currency = currency or self._cfg.default_currency
+        contract.currency = currency
 
         details = self._ib.reqContractDetails(contract)
         if not details:
@@ -608,7 +615,7 @@ class IBKRProvider(MarketDataProvider):
         contract.secType = "STK"
         contract.exchange = "SMART"
         contract.primaryExchange = exchange_name
-        contract.currency = currency or self._cfg.default_currency
+        contract.currency = currency
         
         
         

@@ -7,8 +7,8 @@ import os
 from dataclasses import dataclass, field
 from functools import cached_property
 
-from data_providers.clients.FMP_client import FMPConfig, FMPProvider
-from data_providers.clients.IBKR_client import IBKRConfig, IBKRProvider
+from data_providers import FMPConfig, IBKRConfig, IBKRService, FMPService, DataHubConfig, DataHub
+from data_providers.datahub import PriorityMarket
 #from .data.services.IBKR_service import IBKRService
 
 try:
@@ -20,22 +20,13 @@ try:
     env_path = os.getenv("DATABASE_PATH")
 except Exception as e:
     print("Not using environment variables, please configure your .env file.")
-
-@dataclass
-class Config:
-    market_data_provider: Literal["IBKR", "YFINANCE"] = "IBKR"
-    market_data_provider_config: dict[str, Any] = field(default_factory=dict)
-    fundamental_data_provider: str = "FMP"
-    fundamental_data_provider_config: dict[str, Any] = field(default_factory=dict)
-    # policy knobs you’ll want soon:
-    allow_ensure: bool = True
-    overwrite_priority: tuple[str, ...] = ("IBKR", "YFINANCE")  # higher wins
         
 class Hub:
-    def __init__(self, connection: sql.Connection, config: Config):
+    def __init__(self, connection: sql.Connection, config: DataHubConfig):
         self.conn = connection
         self.config = config
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self.data_hub = DataHub(config)
         
         self._market_data_service = None
         self._fundamental_data_service = None
@@ -51,25 +42,16 @@ class Hub:
     def market_data_service(self):
         if self._market_data_service is None:
 
-            if self.config.market_data_provider == "IBKR":
-                from data_providers.services.IBKR_service import IBKRService
-                cfg = IBKRConfig(**self.config.market_data_provider_config)
-                provider = IBKRProvider(cfg)
-                self._market_data_service = IBKRService(provider)
-            else:
-                raise ValueError(f"Unknown provider {self.config.market_data_provider}")
+            self._market_data_service = self.data_hub.market
+
         return self._market_data_service
     
     @property
     def fundamental_data_service(self):
         if self._fundamental_data_service is None:
-            if self.config.fundamental_data_provider == "FMP":
-                from data_providers.services.FMP_service import FMPService
-                cfg = FMPConfig(**self.config.fundamental_data_provider_config)
-                provider = FMPProvider(api_key = os.getenv("api_key"))
-                self._fundamental_data_service = FMPService(provider)
-            else:
-                raise ValueError(f"Unknown provider {self.config.fundamental_data_provider}")
+
+            self._fundamental_data_service = self.data_hub.fundamentals
+
         return self._fundamental_data_service
 
     @property
@@ -106,20 +88,11 @@ class Hub:
         if self._statements_repo is None:
             self._statements_repo = StatementRepository(self.conn, hub=self)
         return self._statements_repo
-    
-    '''
-    @property
-    def ticker_service(self):
-        if self._ticker_service is None:
-            from services.ticker_service import TickerService
-            self._ticker_service = TickerService(self.conn, self.provider, self.tickers)
-        return self._ticker_service
-    '''
 
 @dataclass
 class DB:
     db_path: str = env_path
-    _config: Config = field(default_factory=Config)
+    config: DataHubConfig = field(default_factory=DataHubConfig)
 
     _connection: sql.Connection = field(init=False)
     _hub: Hub = field(init=False)
@@ -129,7 +102,7 @@ class DB:
         self._connection.execute("PRAGMA foreign_keys = ON")
         # strongly recommended for your workload:
         self._connection.execute("PRAGMA journal_mode = WAL")
-        self._hub = Hub(self._connection, self._config)
+        self._hub = Hub(self._connection, self.config)
 
     def close(self):
         try:

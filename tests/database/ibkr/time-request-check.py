@@ -1,5 +1,5 @@
-from database.db import DB, Config
-from database.data.providers.IBKR_provider import IBKRConfig
+from data_providers import *
+from database_connector import DB
 from dotenv import load_dotenv
 import os
 from datetime import datetime
@@ -7,6 +7,10 @@ import matplotlib.pyplot as plt
 
 load_dotenv()
 test_env_path = os.getenv("TESTING_DATABASE_PATH")
+config = DataHubConfig(
+    market_services=[IBKRService(IBKRConfig())],
+    fundamental_services=[FMPService(FMPConfig(api_key=os.getenv("API_KEY")))]
+)
 
 load_dotenv()
 
@@ -14,9 +18,8 @@ def time_request_check(ticker_symbol="AAPL", exchange_name="NASDAQ", start_date=
     
     start = datetime.now()
 
-    
-    db = DB(db_path = test_env_path)
-    db._hub.market_data_service
+
+    db = DB(db_path = test_env_path, config=config)
     
     ticker = db.get_ticker(ticker_symbol, exchange_name, ensure=True)
     print(ticker)
@@ -46,7 +49,6 @@ def plot_prices(prices):
 if __name__ == "__main__":
     start_date = datetime(2024, 7, 1)
     
-    '''
     # One day test
     print("----- ONE DAY TEST -----")
     duration_day, prices_day = time_request_check(
@@ -79,7 +81,7 @@ if __name__ == "__main__":
     )
     print("----- Prices -----")
     print(prices_month)
-    '''
+
     
     # One year test
     print("----- ONE YEAR TEST -----")
@@ -90,14 +92,15 @@ if __name__ == "__main__":
         end_date=datetime(2025, 7, 1, 16, 0, 0)
     )
     print("----- Prices -----")
+    open("prices_year_9_day.csv", "w").write(prices_year.to_csv())
     print(prices_year)
     
     print("----- SUMMARY OF DURATIONS -----")
-    '''
+
     print(f"Duration for 1 day: {duration_day}")
     print(f"Duration for 1 week: {duration_week}")
     print(f"Duration for 1 month: {duration_month}")
-    '''
+
     print(f"Duration for 1 year: {duration_year}")
     
     

@@ -12,12 +12,14 @@ from .base import FundamentalDataProvider, TickerInfo, EquityInfo
 
 @dataclass
 class FMPConfig:
-    pass
+    api_key: str
+    base_url: Optional[str] = "https://financialmodelingprep.com/stable/"
 
 class FMPProvider(FundamentalDataProvider):
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://financialmodelingprep.com/stable/"
+
+    def __init__(self, config: FMPConfig):
+        self.api_key = config.api_key
+        self.base_url = config.base_url
         
     def connect(self):
         # No persistent connection needed for FMP, but we can validate the API key

@@ -1,14 +1,13 @@
 from typing import List, Literal
-from data_providers.clients.FMP_client import FMPProvider
+from data_providers.clients.FMP_client import FMPConfig, FMPProvider
 from data_providers.clients.base import TickerInfo, EquityInfo
+#from data_providers.exceptions import NotSupported, ProviderError, DataNotFound
 import pandas as pd
 from datetime import datetime, time, timedelta
 
-
-
 class FMPService:
-    def __init__(self, FMPProvider: FMPProvider):
-        self._client = FMPProvider
+    def __init__(self, config: FMPConfig):
+        self._client = FMPProvider(config)
 
     # Service Functions
     def fetch_income_statement(self, symbol: str, prev_years: int, period: str) -> pd.DataFrame:

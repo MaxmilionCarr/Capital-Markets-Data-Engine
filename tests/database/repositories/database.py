@@ -1,4 +1,4 @@
-from database.db import DataBase
+from database_connector import DataBase
 import sqlite3 as sql
 import os
 import time
