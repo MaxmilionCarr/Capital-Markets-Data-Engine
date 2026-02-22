@@ -152,8 +152,8 @@ class _HistPacer:
     """
     def __init__(
         self,
-        min_interval_s: float = 0.6,   # ~2.2 req/s, safely under 6/2s rule
-        max_10min: int = 55,            # keep headroom under 60
+        min_interval_s: float = 0.5,   # ~2.2 req/s, safely under 6/2s rule
+        max_10min: int = 45,            # keep headroom under 60
         adapt_threshold_s: float = 1.5, # if a request takes >1.5s, treat as throttling
         stop_threshold_s: float = 3.0
     ):
@@ -458,15 +458,14 @@ class IBKRProvider(MarketDataProvider):
                     if step_td >= min_chunk:
                         return "Y", n, step_td
 
-            # W
-            '''
+            # W TODO: This needs to be done only if days is exactly fit to weeks
             if max_chunk >= week_td and remaining >= week_td:
                 n = _cap_count(remaining, week_td, max_chunk)
                 if n > 0:
                     step_td = week_td * n
                     if step_td >= min_chunk:
                         return "W", n, step_td
-            '''
+
             # D
             if max_chunk >= day_td and remaining >= day_td:
                 n = _cap_count(remaining, day_td, max_chunk)

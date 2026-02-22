@@ -206,6 +206,17 @@ class DataBase:
                         FOREIGN KEY (ticker_id) REFERENCES tickers(ticker_id) ON DELETE CASCADE
                     );''')
         
+        cur.execute('''CREATE TABLE IF NOT EXISTS equity_intraday_coverage (
+                        equity_id INTEGER NOT NULL,
+                        date      DATE NOT NULL,
+                        period    TEXT NOT NULL,          -- '1 hour', '5 mins'
+                        status    TEXT NOT NULL,          -- ok | closed | partial | missing | error
+                        provider  TEXT NOT NULL,
+                        rows      INTEGER NOT NULL,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (equity_id, date, period, provider)
+                    );''')
+        
         cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_daily (
                         equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
                         datetime DATETIME NOT NULL,

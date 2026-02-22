@@ -30,7 +30,7 @@ def time_request_check(ticker_symbol="AAPL", exchange_name="NASDAQ", start_date=
     equity = ticker.get_equity(ensure=True)
     print(equity)
 
-    prices = equity.get_prices(start_date=start_date, end_date=end_date, period="5 mins", ensure=True)
+    prices = equity.get_prices(start_date=start_date, end_date=end_date, period="1 hour", ensure=True)
     
     end = datetime.now()
     

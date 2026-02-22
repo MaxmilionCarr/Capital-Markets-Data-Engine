@@ -128,9 +128,10 @@ def print_report(df: pd.DataFrame, top_n: int = 10) -> None:
 
 def run_grid_search() -> List[Dict[str, Any]]:
     grid = {
-        "min_interval": [0.35, 0.5, 0.65],
-        "max_10min": [45, 50, 55],
-        "adapt": [1.2, 1.5],
+        "min_interval": [0.5],
+        "max_10min": [45],
+        "adapt": [1.2],
+        "stop": [2.0, 3.0, 4.0]
     }
 
     keys = list(grid.keys())
@@ -154,6 +155,7 @@ def run_grid_search() -> List[Dict[str, Any]]:
             min_interval_s=params["min_interval"],
             max_10min=params["max_10min"],
             adapt_threshold_s=params["adapt"],
+            stop_threshold_s=params["stop"],
         )
 
         cfg = IBKRConfig(pacer=pacer)  # assumes IBKRConfig supports pacer=...

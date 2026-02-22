@@ -26,6 +26,32 @@ def _period_step(period: str) -> timedelta:
         return timedelta(minutes=5)
     raise ValueError("Invalid period")
 
+
+def _is_exact_one_rth_day(
+    s: datetime,
+    e: datetime,
+    *,
+    rth_open: time,
+    rth_close: time,
+) -> bool:
+    """
+    True iff [s, e] is exactly one full regular trading session on a single weekday:
+      - same calendar day
+      - weekday (Mon-Fri)
+      - s.time == rth_open and e.time == rth_close
+    """
+    if s.date() != e.date():
+        return False
+    if s.weekday() >= 5:
+        return False
+    # normalize seconds/micros defensively
+    s_t = s.time().replace(second=0, microsecond=0)
+    e_t = e.time().replace(second=0, microsecond=0)
+    ro = rth_open.replace(second=0, microsecond=0)
+    rc = rth_close.replace(second=0, microsecond=0)
+    return (s_t == ro) and (e_t == rc)
+
+
 class EquityPricesRepository:
     """
     Period-specific tables:
@@ -237,21 +263,20 @@ class EquityPricesRepository:
             df = df[["datetime", "open", "high", "low", "close", "volume"]]
             df["volume"] = df["volume"].fillna(0).astype(int)
 
-            # Convert to python-native tuples (fast)
             rows = [
-                (equity._id,
-                 r.datetime.to_pydatetime(),
-                 float(r.open) if pd.notna(r.open) else None,
-                 float(r.high) if pd.notna(r.high) else None,
-                 float(r.low) if pd.notna(r.low) else None,
-                 float(r.close),
-                 int(r.volume))
+                (
+                    equity._id,
+                    r.datetime.to_pydatetime(),
+                    float(r.open) if pd.notna(r.open) else None,
+                    float(r.high) if pd.notna(r.high) else None,
+                    float(r.low) if pd.notna(r.low) else None,
+                    float(r.close),
+                    int(r.volume),
+                )
                 for r in df.itertuples(index=False)
             ]
 
             cur = self.connection.cursor()
-
-            # Single transaction, bulk insert, ignore duplicates via PK
             cur.execute("BEGIN")
             try:
                 cur.executemany(
@@ -266,7 +291,6 @@ class EquityPricesRepository:
             except Exception:
                 self.connection.rollback()
                 raise
-
 
         def _fetch_and_insert(fetch_start: datetime, fetch_end: datetime) -> None:
             ex = equity._ticker.get_exchange()
@@ -329,7 +353,9 @@ class EquityPricesRepository:
             cur_s, cur_e = slices[0]
 
             for s, e in slices[1:]:
-                if cur_e.time() == rth_close and s.time() == rth_open:
+                # stitch across day boundary only if previous ends at close and next starts at open
+                if cur_e.time().replace(second=0, microsecond=0) == rth_close.replace(second=0, microsecond=0) and \
+                   s.time().replace(second=0, microsecond=0) == rth_open.replace(second=0, microsecond=0):
                     cur_e = e
                 else:
                     out.append((cur_s, cur_e))
@@ -337,23 +363,6 @@ class EquityPricesRepository:
 
             out.append((cur_s, cur_e))
             return out
-
-        def _business_days_between(a: datetime, b: datetime) -> int:
-            """
-            Count Mon-Fri days strictly between a and b (exclusive endpoints).
-            Used only for daily period to avoid weekend patching.
-            """
-            if b <= a:
-                return 0
-            a0 = a.replace(hour=0, minute=0, second=0, microsecond=0)
-            b0 = b.replace(hour=0, minute=0, second=0, microsecond=0)
-            day = a0 + timedelta(days=1)
-            cnt = 0
-            while day < b0:
-                if day.weekday() < 5:
-                    cnt += 1
-                day += timedelta(days=1)
-            return cnt
 
         # --- 1) Read what we already have ---
         existing = self.get_prices(equity, period, start_date, end_date)
@@ -363,12 +372,10 @@ class EquityPricesRepository:
             return self.get_prices(equity, period, start_date, end_date)
 
         period_delta = _period_delta(period)
-
         fetch_windows: list[tuple[datetime, datetime]] = []
 
         # --- 2) Build fetch windows from gaps (DAILY vs INTRADAY) ---
         if period == "1 day":
-            # existing["date"] are 'YYYY-MM-DD' strings
             have = pd.to_datetime(existing["date"], errors="coerce").dt.date
             have = set(d for d in have if pd.notna(d))
 
@@ -379,8 +386,6 @@ class EquityPricesRepository:
                 Weekend-aware only (Mon-Fri).
                 """
                 s_d = s.date()
-
-                # end-exclusive: subtract 1 microsecond so 00:00 end becomes previous date
                 e_adj = e - timedelta(microseconds=1)
                 e_d = e_adj.date()
 
@@ -395,14 +400,12 @@ class EquityPricesRepository:
 
                 return out
 
-
             expected = _expected_dates_daily_exclusive(start_date, end_date)
             missing = sorted(d for d in expected if d not in have)
 
             if not missing:
                 return existing
 
-            # Group missing *dates* into contiguous date runs
             runs: list[tuple[datetime, datetime]] = []
             run_s = missing[0]
             prev = missing[0]
@@ -412,7 +415,6 @@ class EquityPricesRepository:
                     prev = d
                     continue
 
-                # close run [run_s..prev] as [run_s 00:00, (prev+1) 00:00)
                 runs.append(
                     (
                         datetime(run_s.year, run_s.month, run_s.day),
@@ -430,7 +432,6 @@ class EquityPricesRepository:
 
             fetch_windows.extend(runs)
 
-
         else:
             existing_dt = _to_naive(existing["date"])
             existing_dt = pd.Series(sorted(existing_dt.unique()))
@@ -438,7 +439,6 @@ class EquityPricesRepository:
                 _fetch_and_insert(start_date, end_date)
                 return self.get_prices(equity, period, start_date, end_date)
 
-            # edges
             first = existing_dt.iloc[0].to_pydatetime()
             if first - start_date >= period_delta:
                 fetch_windows.append((start_date, first))
@@ -447,7 +447,6 @@ class EquityPricesRepository:
             if end_date - last >= period_delta:
                 fetch_windows.append((last, end_date))
 
-            # interior gaps
             for i in range(len(existing_dt) - 1):
                 a = existing_dt.iloc[i].to_pydatetime()
                 b = existing_dt.iloc[i + 1].to_pydatetime()
@@ -489,7 +488,13 @@ class EquityPricesRepository:
                 continue
 
             stitched = _stitch_slices(slices, rth_open=rth_open, rth_close=rth_close)
+
             for ss, ee in stitched:
+                # --- NEW: ignore stitched fetches that are exactly one trading day ---
+                if _is_exact_one_rth_day(ss, ee, rth_open=rth_open, rth_close=rth_close):
+                    print("SKIP 1D RTH STITCH:", ss, ee)
+                    continue
+
                 print("STITCHED FETCH:", ss, ee)
                 _fetch_and_insert(ss, ee)
 
