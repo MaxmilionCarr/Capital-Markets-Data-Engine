@@ -115,6 +115,12 @@ class DB:
         if exchange is not None:
             return exchange._id
         return None
+    
+    def get_exchange(self, exchange_name: str):
+        exchange = self._hub.exchange_repo.get_info(exchange_name = exchange_name)
+        if exchange is None:
+            raise sql.Error(f"Exchange '{exchange_name}' not found")
+        return exchange
 
     # Allow for a search without exchange name through a bulk insert
     from .repositories.instruments.ticker_repository import Ticker  

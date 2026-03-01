@@ -8,7 +8,7 @@ from datetime import datetime
 nest_asyncio.apply()
 
 # --- CONFIG ---
-OUT_PATH = "C:\\Users\\maxmi\\OneDrive - The University of Melbourne\\Desktop\\TradingProject\\unit_tests\\database\\"
+OUT_PATH = r"C:\\Users\\maxmi\\Desktop\\Financial-Data-API-Integration-Tool\\tests\\database\\ibkr"
 
 # Instead of guessing, the user explicitly specifies the market type
 # You can extend this dictionary to include Futures, Options, Bonds later.
@@ -36,7 +36,7 @@ def make_contract(symbol: str, market_type: str):
 async def fetch_raw(symbol: str, market_type: str):
     ib = IB()
     try:
-        await ib.connectAsync("127.0.0.1", 55000, clientId=1, timeout=10)
+        await ib.connectAsync("127.0.0.1", 55000, clientId=2, timeout=10)
 
         contract = make_contract(symbol, market_type)
 

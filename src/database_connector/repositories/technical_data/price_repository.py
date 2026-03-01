@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3 as sql
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, date
 from typing import Literal
 
 import pandas as pd
@@ -9,8 +9,18 @@ import pandas as pd
 from database_connector.db import Hub
 from database_connector.repositories.instruments.ticker_repository import Equity
 
-periods = {"5 mins", "1 hour", "1 day"}
 
+# -------------------------------------------------
+# Constants
+# -------------------------------------------------
+
+periods = {"5 mins", "1 hour", "1 day"}
+COVERED_STATUSES = {"ok", "partial", "closed"}
+
+
+# -------------------------------------------------
+# Helpers
+# -------------------------------------------------
 
 def _parse_hms(s: str) -> time:
     h, m, sec = map(int, s.split(":"))
@@ -27,178 +37,288 @@ def _period_step(period: str) -> timedelta:
     raise ValueError("Invalid period")
 
 
-def _is_exact_one_rth_day(
-    s: datetime,
-    e: datetime,
-    *,
-    rth_open: time,
-    rth_close: time,
-) -> bool:
-    """
-    True iff [s, e] is exactly one full regular trading session on a single weekday:
-      - same calendar day
-      - weekday (Mon-Fri)
-      - s.time == rth_open and e.time == rth_close
-    """
-    if s.date() != e.date():
-        return False
-    if s.weekday() >= 5:
-        return False
-    # normalize seconds/micros defensively
-    s_t = s.time().replace(second=0, microsecond=0)
-    e_t = e.time().replace(second=0, microsecond=0)
-    ro = rth_open.replace(second=0, microsecond=0)
-    rc = rth_close.replace(second=0, microsecond=0)
-    return (s_t == ro) and (e_t == rc)
+def _day_is_weekday(d: date) -> bool:
+    return d.weekday() < 5
 
+
+def _get_exchange_rth(equity: Equity) -> tuple[time, time]:
+    """
+    Pull RTH bounds from your Exchange model.
+    Fallback only if Exchange is missing/blank.
+    """
+    ex = equity._ticker.get_exchange()
+    if ex and getattr(ex, "rth_open", None) and getattr(ex, "rth_close", None):
+        return _parse_hms(ex.rth_open), _parse_hms(ex.rth_close)
+    return time(9, 30), time(16, 0)
+
+
+# -------------------------------------------------
+# Repository
+# -------------------------------------------------
 
 class EquityPricesRepository:
-    """
-    Period-specific tables:
-      - equity_prices_daily
-      - equity_prices_hourly
-      - equity_prices_five_minute
 
-    Each table schema:
-        equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
-        datetime DATETIME NOT NULL,
-        open REAL,
-        high REAL,
-        low REAL,
-        close REAL NOT NULL,
-        volume INTEGER,
-        PRIMARY KEY (equity_id, datetime)
-    """
+    # =================================================
+    # INIT
+    # =================================================
 
     def __init__(self, connection: sql.Connection, hub: Hub):
         self.connection = connection
         self.hub = hub
         self.connection.execute("PRAGMA foreign_keys = ON")
 
-    # ---------- READ ----------
+    # =================================================
+    # READ
+    # =================================================
 
-    def _fetch_daily(self, equity: Equity, start_date: datetime, end_date: datetime | None = None) -> pd.DataFrame:
-        """
-        NOTE: you said you will store daily as date-only. This query treats stored
-        values as dates using SQLite date(datetime).
-        Returns column name 'date' for compatibility with your ensure logic.
-        """
+    def _fetch_daily(self, equity: Equity, start, end):
         cur = self.connection.cursor()
-        print("Writing into equity_prices_daily")
-        if end_date:
+
+        if end:
             cur.execute(
                 """
-                SELECT equity_id,
-                       date(datetime) AS date,
+                SELECT date(datetime) AS date,
                        open, high, low, close, volume
                 FROM equity_prices_daily
-                WHERE equity_id = ? AND date(datetime) BETWEEN ? AND ?
+                WHERE equity_id = ?
+                  AND date(datetime) BETWEEN ? AND ?
                 ORDER BY date
                 """,
-                (equity._id, start_date, end_date),
+                (equity._id, start, end),
             )
         else:
             cur.execute(
                 """
-                SELECT equity_id,
-                       date(datetime) AS date,
+                SELECT date(datetime) AS date,
                        open, high, low, close, volume
                 FROM equity_prices_daily
-                WHERE equity_id = ? AND date(datetime) >= ?
+                WHERE equity_id = ?
+                  AND date(datetime) >= ?
                 ORDER BY date
                 """,
-                (equity._id, start_date),
+                (equity._id, start),
             )
-        return pd.DataFrame(cur.fetchall(), columns=[col[0] for col in cur.description])
 
-    def _fetch_intraday_raw(
-        self,
-        equity: Equity,
-        period: Literal["1 hour", "5 mins"],
-        start_date: datetime,
-        end_date: datetime | None = None,
-    ) -> pd.DataFrame:
-        """
-        You are already storing aligned bars; fetch raw range.
-        Returns column name 'date' for compatibility with ensure logic.
-        """
-        cur = self.connection.cursor()
+        return pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
+
+    def _fetch_intraday_raw(self, equity: Equity, period, start, end):
         table = "equity_prices_hourly" if period == "1 hour" else "equity_prices_five_minute"
-        print("Writing into", table)
-        if end_date:
+        cur = self.connection.cursor()
+
+        if end:
             cur.execute(
                 f"""
-                SELECT equity_id, datetime AS date, open, high, low, close, volume
+                SELECT datetime AS date,
+                       open, high, low, close, volume
                 FROM {table}
-                WHERE equity_id = ? AND datetime BETWEEN ? AND ?
+                WHERE equity_id = ?
+                  AND datetime BETWEEN ? AND ?
                 ORDER BY datetime
                 """,
-                (equity._id, start_date, end_date),
+                (equity._id, start, end),
             )
         else:
             cur.execute(
                 f"""
-                SELECT equity_id, datetime AS date, open, high, low, close, volume
+                SELECT datetime AS date,
+                       open, high, low, close, volume
                 FROM {table}
-                WHERE equity_id = ? AND datetime >= ?
+                WHERE equity_id = ?
+                  AND datetime >= ?
                 ORDER BY datetime
                 """,
-                (equity._id, start_date),
+                (equity._id, start),
             )
 
-        return pd.DataFrame(cur.fetchall(), columns=[col[0] for col in cur.description])
+        return pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
 
-    def get_prices(
+    def get_prices(self, equity, period, start, end=None):
+        if period == "1 day":
+            return self._fetch_daily(equity, start, end)
+        return self._fetch_intraday_raw(equity, period, start, end)
+
+    # =================================================
+    # COVERAGE
+    # =================================================
+
+    def _get_coverage_status(self, equity: Equity, d: date, period: str, provider: str) -> str | None:
+        cur = self.connection.cursor()
+        cur.execute(
+            """
+            SELECT status
+            FROM equity_intraday_coverage
+            WHERE equity_id = ?
+              AND date = ?
+              AND period = ?
+              AND provider = ?
+            """,
+            (equity._id, d, period, provider),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+    def _is_day_covered(self, equity: Equity, d: date, period: str, provider: str) -> bool:
+        return self._get_coverage_status(equity, d, period, provider) in COVERED_STATUSES
+
+    # =================================================
+    # COVERAGE UPDATE
+    # =================================================
+
+    # TODO: Provide error handling so that errors work as failed
+    def update_intraday_coverage(
         self,
-        equity: Equity,
-        period: Literal["5 mins", "1 hour", "1 day"],
-        start_date: datetime,
-        end_date: datetime | None = None,
-    ) -> pd.DataFrame:
-        if period not in periods:
-            raise ValueError("Period required")
-
-        match period:
-            case "1 day":
-                prices = self._fetch_daily(equity, start_date, end_date)
-            case "1 hour" | "5 mins":
-                prices = self._fetch_intraday_raw(equity, period, start_date, end_date)
-            case _:
-                raise ValueError("Invalid period")
-
-        return prices.drop(columns=["equity_id"]) if "equity_id" in prices.columns else prices
-
-    # ---------- CREATE ----------
-
-    def create(
-        self,
-        equity: Equity,
-        period: str,
-        datetime: datetime,
-        close: float,
         *,
-        open: float,
-        high: float,
-        low: float,
-        volume: int,
+        equity: Equity,
+        df: pd.DataFrame | None,
+        period: str,
+        provider: str,
+        start: datetime,
+        end: datetime,
     ) -> None:
         cur = self.connection.cursor()
-        if period == "1 day":
-            table = "equity_prices_daily"
-        elif period == "1 hour":
-            table = "equity_prices_hourly"
-        elif period == "5 mins":
-            table = "equity_prices_five_minute"
-        else:
-            raise ValueError("Invalid period")
 
-        cur.execute(
-            f"INSERT INTO {table} (equity_id, datetime, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (equity._id, datetime, open, high, low, close, volume),
-        )
+        if df is None:
+            df = pd.DataFrame()
+
+        df = df.copy()
+
+        if not df.empty:
+            df["datetime"] = pd.to_datetime(df["datetime"])
+            df["day"] = df["datetime"].dt.date
+            grouped = df.groupby("day")
+        else:
+            grouped = {}
+
+        if period == "1 hour":
+            expected = 6
+            ok_ratio = 0.80
+        elif period == "5 mins":
+            expected = 78
+            ok_ratio = 0.97
+        elif period == "1 day":
+            expected = 1
+            ok_ratio = 1.0
+        else:
+            return
+
+        cur_day = start.date()
+        last = end.date()
+
+        while cur_day <= last:
+            if _day_is_weekday(cur_day):
+                if cur_day in grouped:
+                    rows = len(grouped.get_group(cur_day))
+                    status = "ok" if rows >= expected * ok_ratio else "partial"
+                else:
+                    rows = 0
+                    status = "closed"
+
+                cur.execute(
+                    """
+                    INSERT INTO equity_intraday_coverage
+                        (equity_id, date, period, status, provider, rows)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(equity_id, date, period, provider)
+                    DO UPDATE SET
+                        status = excluded.status,
+                        rows = excluded.rows,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (equity._id, cur_day, period, status, provider, rows),
+                )
+
+            cur_day += timedelta(days=1)
+
         self.connection.commit()
 
-    # ---------- ENSURE ----------
+    def update_intraday_coverage_failed(
+        self,
+        *,
+        equity: Equity,
+        period: str,
+        provider: str,
+        start: datetime,
+        end: datetime,
+    ) -> None:
+        cur = self.connection.cursor()
+
+        cur_day = start.date()
+        last = end.date()
+
+        while cur_day <= last:
+            if _day_is_weekday(cur_day):
+                rows = 0
+                status = "failed"
+
+                cur.execute(
+                    """
+                    INSERT INTO equity_intraday_coverage
+                        (equity_id, date, period, status, provider, rows)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(equity_id, date, period, provider)
+                    DO UPDATE SET
+                        status = excluded.status,
+                        rows = excluded.rows,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (equity._id, cur_day, period, status, provider, rows),
+                )
+
+            cur_day += timedelta(days=1)
+
+        self.connection.commit()
+    # =================================================
+    # INSERT
+    # =================================================
+
+    def _insert_all(self, equity, period, df: pd.DataFrame):
+        if df is None or df.empty:
+            return
+
+        table = {
+            "1 day": "equity_prices_daily",
+            "1 hour": "equity_prices_hourly",
+            "5 mins": "equity_prices_five_minute",
+        }[period]
+
+        df = df.copy()
+        df["datetime"] = pd.to_datetime(df["datetime"]).dt.tz_localize(None)
+
+        if period == "1 day":
+            df["datetime"] = df["datetime"].dt.normalize()
+
+        rows = [
+            (
+                equity._id,
+                r.datetime.to_pydatetime(),
+                r.open,
+                r.high,
+                r.low,
+                r.close,
+                int(r.volume),
+            )
+            for r in df.itertuples(index=False)
+        ]
+
+        cur = self.connection.cursor()
+        cur.execute("BEGIN")
+        try:
+            cur.executemany(
+                f"""
+                INSERT OR IGNORE INTO {table}
+                (equity_id, datetime, open, high, low, close, volume)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    # =================================================
+    # ENSURE
+    # =================================================
 
     def get_or_create_ensure(
         self,
@@ -206,381 +326,146 @@ class EquityPricesRepository:
         period: Literal["5 mins", "1 hour", "1 day"],
         start_date: datetime,
         end_date: datetime | None = None,
+        *,
+        provider="IBKR",
     ) -> pd.DataFrame:
-        """
-        PRESERVES your original behavior:
-          - compute patch windows from gaps
-          - merge windows
-          - intraday: clip to RTH per day then stitch to reduce calls
-          - insert everything (PK dedupes)
-
-        FIXES:
-          - daily gap detection ignores weekends (no Sat->Mon patch spam)
-          - daily uses date-based gap checks, not timedelta on naive datetimes
-        """
         if end_date is None:
             end_date = datetime.now()
 
         if end_date <= start_date:
-            raise ValueError("end_date must be after start_date")
+            raise ValueError("Invalid date range")
 
-        def _period_delta(p: str) -> pd.Timedelta:
-            match p:
-                case "1 day":
-                    return pd.Timedelta(days=1)
-                case "1 hour":
-                    return pd.Timedelta(hours=1)
-                case "5 mins":
-                    return pd.Timedelta(minutes=5)
-                case _:
-                    raise ValueError("Invalid period")
+        rth_open, rth_close = _get_exchange_rth(equity)
 
-        def _to_naive(dt_series: pd.Series) -> pd.Series:
-            return pd.to_datetime(dt_series, utc=False).dt.tz_localize(None)
-
-        def _insert_all(df: pd.DataFrame) -> None:
-            if df is None or df.empty:
-                return
-
-            table_by_period = {
-                "1 day": "equity_prices_daily",
-                "1 hour": "equity_prices_hourly",
-                "5 mins": "equity_prices_five_minute",
-            }
-            table = table_by_period.get(period)
-            if table is None:
-                raise ValueError("Invalid period")
-
-            # normalize datetimes
-            df = df.copy()
-            df["datetime"] = pd.to_datetime(df["datetime"], utc=False).dt.tz_localize(None)
-
-            # daily: normalize to midnight so you truly store one row per date
-            if period == "1 day":
-                df["datetime"] = df["datetime"].dt.normalize()
-
-            # Keep only needed cols and coerce types
-            df = df[["datetime", "open", "high", "low", "close", "volume"]]
-            df["volume"] = df["volume"].fillna(0).astype(int)
-
-            rows = [
-                (
-                    equity._id,
-                    r.datetime.to_pydatetime(),
-                    float(r.open) if pd.notna(r.open) else None,
-                    float(r.high) if pd.notna(r.high) else None,
-                    float(r.low) if pd.notna(r.low) else None,
-                    float(r.close),
-                    int(r.volume),
-                )
-                for r in df.itertuples(index=False)
-            ]
-
-            cur = self.connection.cursor()
-            cur.execute("BEGIN")
-            try:
-                cur.executemany(
-                    f"""
-                    INSERT OR IGNORE INTO {table}
-                    (equity_id, datetime, open, high, low, close, volume)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    rows,
-                )
-                self.connection.commit()
-            except Exception:
-                self.connection.rollback()
-                raise
-
-        def _fetch_and_insert(fetch_start: datetime, fetch_end: datetime) -> None:
-            ex = equity._ticker.get_exchange()
-            rth_open = _parse_hms(ex.rth_open) if ex and ex.rth_open else None
-            rth_close = _parse_hms(ex.rth_close) if ex and ex.rth_close else None
-
-            df = self.hub.market_data_service.fetch_equity_prices(
-                equity._ticker.symbol,
-                equity._ticker.get_exchange().name,
-                start_date=fetch_start,
-                end_date=fetch_end,
-                bar_size=period,
-                rth_open=rth_open,
-                rth_close=rth_close,
-            )
-            _insert_all(df)
-
-        def _clip_window_to_rth_per_day(
-            s: datetime,
-            e: datetime,
-            rth_open: time,
-            rth_close: time,
-        ) -> list[tuple[datetime, datetime]]:
-            if e <= s:
-                return []
-
-            out: list[tuple[datetime, datetime]] = []
-            day = s.replace(hour=0, minute=0, second=0, microsecond=0)
-            last = e.replace(hour=0, minute=0, second=0, microsecond=0)
-
-            while day <= last:
-                if day.weekday() >= 5:
-                    day += timedelta(days=1)
-                    continue
-
-                d_open = day.replace(hour=rth_open.hour, minute=rth_open.minute, second=0, microsecond=0)
-                d_close = day.replace(hour=rth_close.hour, minute=rth_close.minute, second=0, microsecond=0)
-
-                ss = max(s, d_open)
-                ee = min(e, d_close)
-
-                if ss < ee:
-                    out.append((ss, ee))
-
-                day += timedelta(days=1)
-
-            return out
-
-        def _stitch_slices(
-            slices: list[tuple[datetime, datetime]],
-            *,
-            rth_open: time,
-            rth_close: time,
-        ) -> list[tuple[datetime, datetime]]:
-            if not slices:
-                return []
-
-            slices = sorted(slices, key=lambda x: x[0])
-            out: list[tuple[datetime, datetime]] = []
-            cur_s, cur_e = slices[0]
-
-            for s, e in slices[1:]:
-                # stitch across day boundary only if previous ends at close and next starts at open
-                if cur_e.time().replace(second=0, microsecond=0) == rth_close.replace(second=0, microsecond=0) and \
-                   s.time().replace(second=0, microsecond=0) == rth_open.replace(second=0, microsecond=0):
-                    cur_e = e
-                else:
-                    out.append((cur_s, cur_e))
-                    cur_s, cur_e = s, e
-
-            out.append((cur_s, cur_e))
-            return out
-
-        # --- 1) Read what we already have ---
         existing = self.get_prices(equity, period, start_date, end_date)
 
-        if existing is None or existing.empty:
-            _fetch_and_insert(start_date, end_date)
+        # -------- First fill --------
+        if existing.empty:
+            print(f"No existing data for {equity._ticker.symbol} {period} from {start_date} to {end_date}, fetching...")
+            df = None
+            try:
+                df = self.hub.market_data_service.fetch_equity_prices(
+                    equity._ticker.symbol,
+                    equity._ticker.get_exchange().name,
+                    start_date,
+                    end_date,
+                    bar_size=period,
+                    rth_open=rth_open,
+                    rth_close=rth_close,
+                )
+            except Exception as e:
+                print(f"Error fetching prices for {equity._ticker.symbol} from {start_date} to {end_date}: {e}")
+                self.update_intraday_coverage_failed(
+                    equity=equity,
+                    period=period,
+                    provider=provider,
+                    start=start_date,
+                    end=end_date,
+                )
+                return self.get_prices(equity, period, start_date, end_date)
+            else:
+                self._insert_all(equity, period, df)
+
+                self.update_intraday_coverage(
+                    equity=equity,
+                    df=df,
+                    period=period,
+                    provider=provider,
+                    start=start_date,
+                    end=end_date,
+                )
+
             return self.get_prices(equity, period, start_date, end_date)
 
-        period_delta = _period_delta(period)
-        fetch_windows: list[tuple[datetime, datetime]] = []
+        # -------- Find missing weekdays (but don’t refetch if coverage says closed/partial/ok) --------
+        existing["dt"] = pd.to_datetime(existing["date"])
+        have_days = set(existing["dt"].dt.date)
 
-        # --- 2) Build fetch windows from gaps (DAILY vs INTRADAY) ---
-        if period == "1 day":
-            have = pd.to_datetime(existing["date"], errors="coerce").dt.date
-            have = set(d for d in have if pd.notna(d))
+        missing: list[date] = []
+        cur = start_date.date()
+        last = end_date.date()
 
-            def _expected_dates_daily_exclusive(s: datetime, e: datetime) -> list[datetime.date]:
-                """
-                Expected DAILY dates in [s, e) (end-exclusive).
-                If e is at 00:00, we exclude that calendar date entirely.
-                Weekend-aware only (Mon-Fri).
-                """
-                s_d = s.date()
-                e_adj = e - timedelta(microseconds=1)
-                e_d = e_adj.date()
+        while cur <= last:
+            if _day_is_weekday(cur):
+                if cur not in have_days:
+                    if not self._is_day_covered(equity, cur, period, provider):
+                        missing.append(cur)
+            cur += timedelta(days=1)
 
-                out: list[datetime.date] = []
-                cur = datetime(s_d.year, s_d.month, s_d.day)
-                end_ = datetime(e_d.year, e_d.month, e_d.day)
+        if not missing:
+            return existing.drop(columns=["dt"])
 
-                while cur <= end_:
-                    if cur.weekday() < 5:
-                        out.append(cur.date())
-                    cur += timedelta(days=1)
+        missing = sorted(missing)
 
-                return out
+        # -------- Group windows, bridging weekends so you don’t split Fri->Mon --------
+        windows: list[tuple[datetime, datetime]] = []
 
-            expected = _expected_dates_daily_exclusive(start_date, end_date)
-            missing = sorted(d for d in expected if d not in have)
+        run_s = missing[0]
+        prev = missing[0]
 
-            if not missing:
-                return existing
+        def _same_run(prev_d: date, cur_d: date) -> bool:
+            gap = (cur_d - prev_d).days
+            if gap == 1:
+                return True
+            # this is the actual reason you were splitting: Fri->Mon is 3
+            if gap <= 3:
+                return True
+            return False
 
-            runs: list[tuple[datetime, datetime]] = []
-            run_s = missing[0]
-            prev = missing[0]
+        for d in missing[1:]:
+            if _same_run(prev, d):
+                prev = d
+                continue
 
-            for d in missing[1:]:
-                if (d - prev).days == 1:
-                    prev = d
-                    continue
-
-                runs.append(
-                    (
-                        datetime(run_s.year, run_s.month, run_s.day),
-                        datetime(prev.year, prev.month, prev.day) + timedelta(days=1),
-                    )
-                )
-                run_s = prev = d
-
-            runs.append(
+            windows.append(
                 (
-                    datetime(run_s.year, run_s.month, run_s.day),
-                    datetime(prev.year, prev.month, prev.day) + timedelta(days=1),
+                    datetime.combine(run_s, rth_open),
+                    datetime.combine(prev, rth_close),
                 )
             )
+            run_s = prev = d
 
-            fetch_windows.extend(runs)
+        windows.append(
+            (
+                datetime.combine(run_s, rth_open),
+                datetime.combine(prev, rth_close),
+            )
+        )
 
-        else:
-            existing_dt = _to_naive(existing["date"])
-            existing_dt = pd.Series(sorted(existing_dt.unique()))
-            if existing_dt.empty:
-                _fetch_and_insert(start_date, end_date)
-                return self.get_prices(equity, period, start_date, end_date)
-
-            first = existing_dt.iloc[0].to_pydatetime()
-            if first - start_date >= period_delta:
-                fetch_windows.append((start_date, first))
-
-            last = existing_dt.iloc[-1].to_pydatetime()
-            if end_date - last >= period_delta:
-                fetch_windows.append((last, end_date))
-
-            for i in range(len(existing_dt) - 1):
-                a = existing_dt.iloc[i].to_pydatetime()
-                b = existing_dt.iloc[i + 1].to_pydatetime()
-                if (b - a) >= (period_delta * 2):
-                    fetch_windows.append((a + period_delta, b))
-
-        if not fetch_windows:
-            return existing
-
-        # --- 3) Merge overlapping/adjacent windows to reduce IBKR calls ---
-        fetch_windows.sort(key=lambda x: x[0])
-        merged: list[tuple[datetime, datetime]] = []
-        for s, e in fetch_windows:
-            if not merged:
-                merged.append((s, e))
+        # -------- Fetch those bigger windows --------
+        for s, e in windows:
+            df = None
+            print(f"Fetching missing window for {equity._ticker.symbol} {period} from {s} to {e}...")
+            try:
+                df = self.hub.market_data_service.fetch_equity_prices(
+                    equity._ticker.symbol,
+                    equity._ticker.get_exchange().name,
+                    start_date=s,
+                    end_date=e,
+                    bar_size=period,
+                    rth_open=rth_open,
+                    rth_close=rth_close,
+                )
+            except Exception as e:
+                print(f"Error fetching prices for {equity._ticker.symbol} from {s} to {e}: {e}")
+                self.update_intraday_coverage_failed(
+                    equity=equity,
+                    period=period,
+                    provider=provider,
+                    start=s,
+                    end=e,
+                )
                 continue
-            ps, pe = merged[-1]
-            if s <= pe + period_delta:
-                merged[-1] = (ps, max(pe, e))
             else:
-                merged.append((s, e))
+                self._insert_all(equity, period, df)
 
-        # --- 4) Fetch + insert (preserve clip+stitch for intraday) ---
-        ex = equity._ticker.get_exchange()
-        rth_open = _parse_hms(ex.rth_open) if ex and getattr(ex, "rth_open", None) else time(9, 30)
-        rth_close = _parse_hms(ex.rth_close) if ex and getattr(ex, "rth_close", None) else time(16, 0)
-
-        for s, e in merged:
-            if e <= s:
-                continue
-
-            if period == "1 day":
-                print("PATCH FETCH:", s, e)
-                _fetch_and_insert(s, e)
-                continue
-
-            slices = _clip_window_to_rth_per_day(s, e, rth_open, rth_close)
-            if not slices:
-                continue
-
-            stitched = _stitch_slices(slices, rth_open=rth_open, rth_close=rth_close)
-
-            for ss, ee in stitched:
-                # --- NEW: ignore stitched fetches that are exactly one trading day ---
-                if _is_exact_one_rth_day(ss, ee, rth_open=rth_open, rth_close=rth_close):
-                    print("SKIP 1D RTH STITCH:", ss, ee)
-                    continue
-
-                print("STITCHED FETCH:", ss, ee)
-                _fetch_and_insert(ss, ee)
+                self.update_intraday_coverage(
+                    equity=equity,
+                    df=df,
+                    period=period,
+                    provider=provider,
+                    start=s,
+                    end=e,
+                )
 
         return self.get_prices(equity, period, start_date, end_date)
-
-    # ---------- UPDATE ----------
-
-    def update(
-        self,
-        equity: Equity,
-        period: str,
-        datetime: datetime,
-        *,
-        open: float,
-        high: float,
-        low: float,
-        close: float,
-        volume: int,
-    ) -> int:
-        cur = self.connection.cursor()
-        if period == "1 day":
-            table = "equity_prices_daily"
-        elif period == "1 hour":
-            table = "equity_prices_hourly"
-        elif period == "5 mins":
-            table = "equity_prices_five_minute"
-        else:
-            raise ValueError("Invalid period")
-
-        cur.execute(
-            f"""
-            UPDATE {table}
-            SET open = ?, high = ?, low = ?, close = ?, volume = ?
-            WHERE equity_id = ? AND datetime = ?
-            """,
-            (open, high, low, close, volume, equity._id, datetime),
-        )
-        self.connection.commit()
-        return cur.rowcount
-
-    # ---------- DELETE ----------
-
-    def delete_equity(self, equity_id: int, period: str) -> int:
-        cur = self.connection.cursor()
-        if period == "1 day":
-            table = "equity_prices_daily"
-        elif period == "1 hour":
-            table = "equity_prices_hourly"
-        elif period == "5 mins":
-            table = "equity_prices_five_minute"
-        else:
-            raise ValueError("Invalid period")
-
-        cur.execute(f"DELETE FROM {table} WHERE equity_id = ?", (equity_id,))
-        self.connection.commit()
-        return cur.rowcount
-
-    def delete_range(self, equity_id: int, period: str, start_date: datetime, end_date: datetime) -> int:
-        cur = self.connection.cursor()
-        if period == "1 day":
-            table = "equity_prices_daily"
-        elif period == "1 hour":
-            table = "equity_prices_hourly"
-        elif period == "5 mins":
-            table = "equity_prices_five_minute"
-        else:
-            raise ValueError("Invalid period")
-
-        cur.execute(
-            f"DELETE FROM {table} WHERE equity_id = ? AND datetime BETWEEN ? AND ?",
-            (equity_id, start_date, end_date),
-        )
-        self.connection.commit()
-        return cur.rowcount
-
-    def delete_all(self, period: str) -> int:
-        cur = self.connection.cursor()
-        if period == "1 day":
-            table = "equity_prices_daily"
-        elif period == "1 hour":
-            table = "equity_prices_hourly"
-        elif period == "5 mins":
-            table = "equity_prices_five_minute"
-        else:
-            raise ValueError("Invalid period")
-
-        cur.execute(f"DELETE FROM {table}")
-        self.connection.commit()
-        return cur.rowcount

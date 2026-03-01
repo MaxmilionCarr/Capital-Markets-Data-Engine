@@ -6,6 +6,11 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 load_dotenv()
+
+pacer = _HistPacer(
+    max_10min=100
+)
+
 test_env_path = os.getenv("TESTING_DATABASE_PATH")
 config = DataHubConfig(
     market_services=[IBKRService(IBKRConfig())],
@@ -30,7 +35,7 @@ def time_request_check(ticker_symbol="AAPL", exchange_name="NASDAQ", start_date=
     equity = ticker.get_equity(ensure=True)
     print(equity)
 
-    prices = equity.get_prices(start_date=start_date, end_date=end_date, period="1 hour", ensure=True)
+    prices = equity.get_prices(start_date=start_date, end_date=end_date, period="5 mins", ensure=True)
     
     end = datetime.now()
     
@@ -86,10 +91,10 @@ if __name__ == "__main__":
     # One year test
     print("----- ONE YEAR TEST -----")
     duration_year, prices_year = time_request_check(
-        ticker_symbol="AAPL",
+        ticker_symbol="TSLA",
         exchange_name="NASDAQ",
         start_date=start_date,
-        end_date=datetime(2025, 7, 1, 16, 0, 0)
+        end_date=datetime(2025, 12, 1, 16, 0, 0)
     )
     print("----- Prices -----")
     open("prices_year_9_day.csv", "w").write(prices_year.to_csv())
