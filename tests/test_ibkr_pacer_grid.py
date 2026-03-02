@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 from tqdm import tqdm
 
-from data_providers.clients.IBKR_client import (
+from data_providers.clients.websockets.IBKR_client import (
     IBKRProvider,
     IBKRConfig,
     _HistPacer,
