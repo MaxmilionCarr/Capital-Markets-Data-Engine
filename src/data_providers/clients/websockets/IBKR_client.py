@@ -10,7 +10,7 @@ import time as _time
 import random as _random
 from collections import deque as _deque
 
-from .base import MarketDataProvider, Provider, TickerInfo, BondInfo, EquityInfo
+from data_providers.clients.base import MarketDataProvider, Provider, IssuerInfo, EquityInfo
 
 
 # ---------------- helpers ----------------
@@ -240,8 +240,8 @@ class IBKRProvider(MarketDataProvider):
         self._ib.disconnect()
         self._connected = False
 
-    # ---- ticker info ----
-    def get_ticker_information(self, symbol: str, exchange_name: Optional[str] = None):
+    # ---- issuer info ----
+    def get_issuer_information(self, symbol: str, exchange_name: Optional[str] = None):
         if not self._connected:
             raise ConnectionError("Not connected to IBKR. Call connect() first.")
 
@@ -271,7 +271,7 @@ class IBKRProvider(MarketDataProvider):
         if o is None or c is None:
             o, c = _extract_first_session(trading_hours)
 
-        return TickerInfo(
+        return IssuerInfo(
             symbol=contract.symbol,
             exchange=getattr(contract, "primaryExchange", None) or None,
             currency=getattr(contract, "currency", None) or None,
@@ -518,6 +518,7 @@ class IBKRProvider(MarketDataProvider):
         return df
 
     # ---- bonds (unchanged) ----
+    '''
     def get_bond_information(self, CUSID: str, exchange_name: str = None, currency: str = None) -> TickerInfo:
         contract = Contract()
         contract.secType = "BOND"
@@ -578,23 +579,5 @@ class IBKRProvider(MarketDataProvider):
             ]
         )
         return _normalize_bars_df(df)
-
-    # Fundamental Data
-    def get_financial_statements(self, symbol: str, exchange_name: str = None, currency: str = None) -> dict:
-        
-        contract = Contract()
-        contract.symbol = symbol
-        contract.secType = "STK"
-        contract.exchange = "SMART"
-        contract.primaryExchange = exchange_name
-        contract.currency = currency
-        
-        
-        
-        contract = self._ib.qualifyContracts(contract)[0]
-        print(contract)
-        statements = self._ib.reqFundamentalData(contract, reportType="RESC")
-        
-        return statements
-        
+    '''
         

@@ -26,14 +26,12 @@ def time_request_check(ticker_symbol="AAPL", exchange_name="NASDAQ", start_date=
 
     db = DB(db_path = test_env_path, config=config)
     
-    ticker = db.get_ticker(ticker_symbol, exchange_name, ensure=True)
-    print(ticker)
+    equity = db.get_equity(ticker_symbol, exchange_name, ensure=True)
+    print(equity)
     
-    exchange = ticker.get_exchange()
+    exchange = equity.exchange
     print(exchange)
     
-    equity = ticker.get_equity(ensure=True)
-    print(equity)
 
     prices = equity.get_prices(start_date=start_date, end_date=end_date, period="5 mins", ensure=True)
     

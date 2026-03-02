@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import datetime
 from typing import Any, Optional, Sequence, Literal, Protocol
 from .exceptions import NotSupported, ProviderError, DataNotFound
 
@@ -12,7 +13,10 @@ class MarketService(Protocol):
     name: str
     def fetch_ticker(self, symbol: str, exchange_name: str | None = None): ...
     def fetch_equity(self, symbol: str, exchange_name: str | None = None, currency: str | None = None): ...
-    def fetch_equity_prices(self, *args, **kwargs): ...
+    def fetch_equity_prices(self, symbol: str, 
+                            exchange_name: str, start_date: datetime, 
+                            end_date: Optional[datetime] = None, bar_size: Literal["5 mins", "1 hour", "1 day"] = "1 day", 
+                            rth_open: Optional[datetime.time] = None, rth_close: Optional[datetime.time] = None): ...
 
 
 class FundamentalService(Protocol):

@@ -8,7 +8,7 @@ from typing import Literal, Optional
 
 import pandas as pd
 
-from .base import FundamentalDataProvider, TickerInfo, EquityInfo
+from data_providers.clients.base import FundamentalDataProvider, IssuerInfo, EquityInfo
 
 @dataclass
 class FMPConfig:

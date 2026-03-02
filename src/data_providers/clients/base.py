@@ -7,10 +7,12 @@ import pandas as pd
 class Provider(IntEnum):
     YFINANCE = 1
     IBKR = 2
+    MASSIVE = 3
+    FMP = 4
     
 
 @dataclass(frozen=True)
-class TickerInfo:
+class IssuerInfo:
     symbol: str
     exchange: Optional[str]
     currency: Optional[str]
@@ -20,16 +22,8 @@ class TickerInfo:
     provider: Provider
     rth_open: Optional[str] = None   # "HH:MM:SS"
     rth_close: Optional[str] = None  # "HH:MM:SS"
-
-@dataclass(frozen=True)
-class BondInfo:
-    CUSID: str
-    issuer: Optional[str]
-    coupon: Optional[float]
-    maturity_date: Optional[str]
-    credit_rating: Optional[str]
-    currency: Optional[str]
-    provider: Provider
+    cik: Optional[str] = None
+    lei: Optional[str] = None
     
 @dataclass(frozen=True)
 class EquityInfo:
@@ -56,8 +50,8 @@ class MarketDataProvider(ABC):
         pass
 
     @abstractmethod
-    def get_ticker_information(self, symbol: str) -> TickerInfo:
-        """Fetch ticker information for the given symbol."""
+    def get_issuer_information(self, symbol: str) -> IssuerInfo:
+        """Fetch issuer information for the given symbol."""
         pass
 
     '''

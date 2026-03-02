@@ -1,5 +1,5 @@
 from typing import List, Literal
-from data_providers.clients.FMP_client import FMPConfig, FMPProvider
+from data_providers.clients import FMPConfig, FMPProvider
 from data_providers.clients.base import TickerInfo, EquityInfo
 #from data_providers.exceptions import NotSupported, ProviderError, DataNotFound
 import pandas as pd
