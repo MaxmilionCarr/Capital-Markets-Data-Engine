@@ -1,4 +1,4 @@
-# DataHub
+# The Financial Data API Integration Tool (DataHub)
 
 **DataHub** is a provider-agnostic financial data orchestration and
 storage framework designed to ingest, enrich, and store market and
@@ -12,21 +12,21 @@ The system combines incomplete responses from different APIs to produce
 
 ## Key Features
 
--   **Provider-agnostic architecture**\
+-   **Provider-agnostic architecture**
     Applications interact with a single interface regardless of the
     underlying data provider.
 
--   **Multi-provider data enrichment**\
+-   **Multi-provider data enrichment**
     Data from different providers is merged to fill missing fields.
 
--   **Priority-based provider routing**\
+-   **Priority-based provider routing**
     Providers are queried in priority order and only used when required.
 
--   **Issuer-centric data model**\
+-   **Issuer-centric data model**
     Companies are treated as the primary entity, with listings attached
     to them.
 
--   **Database abstraction layer**\
+-   **Database abstraction layer**
     The storage layer is isolated from data ingestion, allowing support
     for multiple database backends.
 
