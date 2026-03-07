@@ -32,7 +32,7 @@ class Hub:
         self._fundamental_data_service = None
 
         self._exchange_repo = None
-        self._ticker_repo = None
+        self._issuer_repo = None
         self._equities_repo = None
         self._equity_prices_repo = None
         
@@ -63,14 +63,14 @@ class Hub:
     
     @property
     def issuer_repo(self):
-        from .repositories.instruments.issuer_repository import IssuerRepository
-        if self._ticker_repo is None:
-            self._ticker_repo = IssuerRepository(self.conn, hub=self)
-        return self._ticker_repo
+        from .repositories.core.issuer_repository import IssuerRepository
+        if self._issuer_repo is None:
+            self._issuer_repo = IssuerRepository(self.conn, hub=self)
+        return self._issuer_repo
 
     @property
     def equities_repo(self):
-        from .repositories.instruments.issuer_repository import EquitiesRepository
+        from .repositories.core.issuer_repository import EquitiesRepository
         if self._equities_repo is None:
             self._equities_repo = EquitiesRepository(self.conn, hub=self)
         return self._equities_repo
@@ -123,7 +123,7 @@ class DB:
         return exchange
 
     # Allow for a search without exchange name through a bulk insert
-    from .repositories.instruments.issuer_repository import Equity
+    from .repositories.core.issuer_repository import Equity
     def get_equity(self, symbol: str, exchange_name: str, *, ensure: bool = False) -> Equity | List[Equity] | None:
         exchange_name = exchange_name.strip()
 

@@ -4,7 +4,7 @@ import sqlite3 as sql
 from dataclasses import dataclass
 from typing import Optional, List
 from database_connector.db import Hub
-from database_connector.repositories.instruments.issuer_repository import EquitiesRepository
+from database_connector.repositories.core.issuer_repository import EquitiesRepository
 
 EXIT_SUCCESS = 1
 EXIT_FAILURE = 0

@@ -1,96 +1,79 @@
 from datetime import datetime
-from database_connector.data.clients.IBKR_client import IBKRProvider, IBKRConfig
-from database_connector.data.clients.FMP_client import FMPProvider
-from database_connector.data.clients.base import Provider, TickerInfo
+from data_providers import  IBKRConfig, IBKRService, DataHubConfig, DataHub, FMPConfig, FMPService
+from database_connector import DB, DataBase
 import pandas as pd
 import csv
 import os
 
-api_key = os.getenv("api_key")
+api_key = os.getenv("FMP_API_KEY")
+db_path = "./testing.db"
+def create_test_database():
+    database = DataBase(db_path)
+    database.create_db()
 
 def main(symbols = None, exchange_name = None):
-    cfg = IBKRConfig(
+    ibkr_cfg = IBKRConfig(
         host="127.0.0.1",
-        port=55000,      # paper / gateway port
+        port=60000,      # paper / gateway port
         client_id=1,
     )
 
-    provider = IBKRProvider(cfg)
-
-    print("Connecting to IBKR...")
-    provider.connect()
-    print("Connected ✅\n")
-    
-
-    df = provider.get_equity_prices("AAPL", "NASDAQ", start_date=datetime(2026, 1, 29), bar_size="1 day")
-    print(df)
-    
-def test_bonds(CUSID):
-    cfg = IBKRConfig(
-        host="127.0.0.1",
-        port=55000,      # paper / gateway port
-        client_id=1,
+    fmp_cfg = FMPConfig(
+        api_key=api_key,
     )
 
-    provider = IBKRProvider(cfg)
-    
-    print("Connecting to IBKR...")
-    provider.connect()
-    print("Connected ✅\n")
-    
 
-    info = provider.get_bond(CUSID)
-    print("Returned object type:", type(info))
-    assert isinstance(info, TickerInfo)
 
-    print("\n--- TickerInfo fields ---")
-    print("symbol     :", info.symbol)
-    print("exchange   :", info.exchange)
-    print("currency   :", info.currency)
-    print("long_name  :", info.long_name)
-    print("sec_type   :", info.sec_type)
-    print("industry   :", info.industry)
-    print("timezone   :", info.timezone)
-    print("provider   :", info.provider)
+    datahub_cfg = DataHubConfig(
+        market_services=(FMPService(fmp_cfg), IBKRService(ibkr_cfg)),
+        fundamental_services=(FMPService(fmp_cfg),)
+    )
 
-    print("Returned object type:", type(info))
-    assert isinstance(info, TickerInfo)
-    
-    df = provider.get_bond_prices(CUSID, start_date="2026-01-23")
-    print(df.head())
-    print("\nDataFrame columns:", df.columns.tolist())
+    db = DB(db_path, datahub_cfg)
 
-    expected_cols = {"datetime", "open", "high", "low", "close", "volume"}
-    assert expected_cols.issubset(df.columns)
+    db.get_equity(
+        symbol="AAPL",
+        exchange_name="NASDAQ",
+        ensure=True
+    )
 
-    print("\nHistorical prices check passed ✅")
+    GOOGL_equity = db.get_equity(
+        symbol="GOOGL",
+        exchange_name="NASDAQ",
+        ensure=True
+    )
 
-    print("TickerInfo checks passed ✅\n")
+    first_issuer = GOOGL_equity.issuer
 
-    provider.disconnect()
-    print("\nDisconnected cleanly ✅")
+    GOOG_equity = db.get_equity(
+        symbol="GOOG",
+        exchange_name="NASDAQ",
+        ensure=True
+    )
 
-def test_fundamentals(symbol, exchange_name, provider: FMPProvider):
-    print("Testing fundamentals retrieval...")
-    df = provider.get_income_statement(symbol, prev_years=3, period="annual")
-    print(df.head())
-    print("\nDataFrame columns:", df.columns.tolist())
+    second_issuer = GOOG_equity.issuer
 
-    print("\nFundamentals retrieval check passed ✅")
-    open("fundamentals_test_output.csv", "w", newline="").write(df.to_csv(index=False))
-    
-    
+    print(f"First issuer: {first_issuer}")
+    print(f"Second issuer: {second_issuer}")
+
+    income_statement = first_issuer.get_statements(
+        statement_type="income_statement",
+        period="annual",
+        look_back=5,
+        ensure=True
+    )
+
+    print(f"Income statement for {first_issuer}:")
+    print(income_statement[0])
+
+    print("Alphabet Equities:")
+    for eq in first_issuer.get_equities():
+        print(eq)
+
+
 
 if __name__ == "__main__":
-    '''
-    cfg = IBKRConfig(
-        host="127.0.0.1",
-        port=55000,      # paper / gateway port
-        client_id=1,
-    )
+    create_test_database()
+    main()
 
-    provider = IBKRProvider(cfg)
-    '''
-    
-    test_fundamentals("AAPL", "NASDAQ", FMPProvider(api_key=api_key))
     

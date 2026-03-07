@@ -7,7 +7,7 @@ from typing import Literal
 import pandas as pd
 
 from database_connector.db import Hub
-from database_connector.repositories.instruments.issuer_repository import Equity
+from database_connector.repositories.core.issuer_repository import Equity
 
 
 # -------------------------------------------------

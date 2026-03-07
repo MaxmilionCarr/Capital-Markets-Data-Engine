@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace, is_dataclass
 import datetime
 from typing import Any, Optional, Sequence, Literal, Protocol
 from .exceptions import NotSupported, ProviderError, DataNotFound
+from data_providers.clients.base import EquityBuilder, IssuerBuilder, IssuerInfo, EquityInfo
 
 # ---- types ----
 StatementType = Literal["income_statement", "balance_sheet", "cash_flow"]
@@ -11,12 +12,11 @@ Period = Literal["annual", "quarterly"]
 
 class MarketService(Protocol):
     name: str
-    def fetch_ticker(self, symbol: str, exchange_name: str | None = None): ...
-    def fetch_equity(self, symbol: str, exchange_name: str | None = None, currency: str | None = None): ...
-    def fetch_equity_prices(self, symbol: str, 
-                            exchange_name: str, start_date: datetime, 
-                            end_date: Optional[datetime] = None, bar_size: Literal["5 mins", "1 hour", "1 day"] = "1 day", 
-                            rth_open: Optional[datetime.time] = None, rth_close: Optional[datetime.time] = None): ...
+
+    def fetch_issuer(self, symbol: str, exchange_name: str | None = None) -> IssuerInfo: ...
+    def fetch_equity(self, symbol: str, exchange_name: str | None = None, currency: str | None = None) -> EquityInfo: ...
+    # TODO: FIX REQUIREMENTS FOR ARGUMENTS
+    def fetch_equity_prices(self, args, kwargs): ...
 
 
 class FundamentalService(Protocol):
@@ -29,23 +29,70 @@ class FundamentalService(Protocol):
 class PriorityMarket:
     services: Sequence[MarketService]
 
-    def fetch_ticker(self, symbol: str, exchange_name: str | None = None):
+    def fetch_issuer_enriched(self, symbol: str, exchange_name: str | None = None) -> IssuerBuilder:
         last: Exception | None = None
-        for s in self.services:
-            try:
-                return s.fetch_ticker(symbol, exchange_name)
-            except (NotSupported, DataNotFound, ProviderError) as e:
-                last = e
-        raise last or ProviderError("No market services configured")
+        base = IssuerBuilder()
+        received_any_data = False
 
-    def fetch_equity(self, symbol: str, exchange_name: str | None = None, currency: str | None = None):
-        last: Exception | None = None
         for s in self.services:
+            print("Trying", s.name)
             try:
-                return s.fetch_equity(symbol, exchange_name, currency)
+                info = s.fetch_issuer(symbol, exchange_name)
+                print("Got info", info)
+                received_any_data = True
             except (NotSupported, DataNotFound, ProviderError) as e:
+                print(f"{s.name} failed to fetch issuer: {e}")
                 last = e
-        raise last or ProviderError("No market services configured")
+                continue
+
+            base.merge_data(info)
+            print("Merged to base", base)
+
+        if base.is_complete():
+            print("Base is complete!")
+            return base
+
+        if not received_any_data:
+            raise last or ProviderError("No market services provided valid issuer data")
+
+        print("Base is missing required fields:", base.missing_fields())
+        raise ProviderError(
+            f"Issuer data incomplete for {symbol} ({exchange_name}). "
+            f"Missing: {base.missing_fields()}"
+        )
+
+    # TODO: An enriched equity fetch as well
+    def fetch_equity_enriched(self, symbol: str, exchange_name: str | None = None, currency: str | None = None) -> EquityBuilder:
+        last: Exception | None = None
+        base = EquityBuilder()
+        received_any_data = False
+
+        for s in self.services:
+            print("Trying", s.name)
+            try:
+                info = s.fetch_equity(symbol, exchange_name, currency)
+                print("Got info", info)
+                received_any_data = True
+            except (NotSupported, DataNotFound, ProviderError) as e:
+                print(f"{s.name} failed to fetch equity: {e}")
+                last = e
+                continue
+
+            base.merge_data(info)
+            print("Merged to base", base)
+
+        if base.is_complete():
+            print("Base is complete!")
+            return base
+
+        if not received_any_data:
+            raise last or ProviderError("No market services provided valid equity data")
+
+        print("Base is missing required fields:", base.missing_fields())
+        raise ProviderError(
+            f"Equity data incomplete for {symbol} ({exchange_name}). "
+            f"Missing: {base.missing_fields()}"
+        )
     
     def fetch_equity_prices(self, *args, **kwargs):
         last: Exception | None = None

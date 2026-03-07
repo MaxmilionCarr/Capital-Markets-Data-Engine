@@ -142,14 +142,23 @@ class StatementRepository:
 
         print("Refetch requested")
         # 2) Fetch from service
-        symbol = self.hub.ticker_repo.get_symbol_by_issuer_id(issuer_id)
+        issuer = self.hub.issuer_repo.get_info(issuer_id=issuer_id)
+        equities = issuer.get_equities()
+        for equity in equities:
+            symbol = equity.symbol
+            exchange_name = equity.exchange.name
 
-        fetched = self.hub.fundamental_data_service.fetch_statement(
-            symbol,
-            statement_type,
-            count,        # service expected to return most recent N
-            period,
-        ) or []
+            try:
+                fetched = self.hub.fundamental_data_service.fetch_statement(
+                    symbol,
+                    statement_type,
+                    count,        # service expected to return most recent N
+                    period,
+                ) or []
+                break  # stop after first successful fetch
+            except Exception as e:
+                print(f"Error fetching {statement_type} for {symbol} on {exchange_name}: {e}")
+                continue
 
         # 3) Upsert everything fetched (override safe)
         for st in fetched[:count]:

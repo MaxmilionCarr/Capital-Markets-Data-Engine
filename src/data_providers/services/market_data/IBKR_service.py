@@ -11,6 +11,9 @@ from data_providers.clients.base import IssuerInfo, EquityInfo
 
 
 class IBKRService:
+    name = "IBKR"
+    issuer_capabilities = IBKRProvider.issuer_capabilities
+    equity_capabilities = IBKRProvider.equity_capabilities
     def __init__(self, config: IBKRConfig):
         self._config = config
         self._client = IBKRProvider(config)

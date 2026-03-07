@@ -2,26 +2,29 @@ from data_providers import DataHub, DataHubConfig, FMPService, FMPConfig, IBKRSe
 import os
 from dotenv import load_dotenv
 
+load_dotenv()
+
 def test_datahub():
-    fundamental_service = FMPService(FMPConfig(
-        api_key = os.getenv("API_KEY")
+    fmp_service = FMPService(FMPConfig(
+        api_key = os.getenv("FMP_API_KEY")
     ))
 
-    market_service = IBKRService(IBKRConfig())
+    ibkr_service = IBKRService(IBKRConfig(
+        port = 60000
+    ))
 
     config = DataHubConfig(
-        market_services = [market_service],
-        fundamental_services = [fundamental_service]
+        market_services = [ibkr_service, fmp_service],
+        fundamental_services = [fmp_service]
     )
 
     hub = DataHub(config)
 
+    print("Fetching Statements")
     response = hub.fundamentals.fetch_statement("AAPL", "income_statement", 1, "annual")
     print(response)
 
-    market_service = hub.market
-
-    response = market_service.fetch_equity("AAPL", "NASDAQ")
+    response = hub.market.fetch_issuer_enriched("AAPL", "NASDAQ")
     print(response)
 
 if __name__ == "__main__":

@@ -10,8 +10,7 @@ import time as _time
 import random as _random
 from collections import deque as _deque
 
-from data_providers.clients.base import MarketDataProvider, Provider, IssuerInfo, EquityInfo
-
+from data_providers.clients.base import MarketDataProvider, Provider, IssuerInfo, IssuerCapabilities, EquityInfo, EquityCapabilities
 
 # ---------------- helpers ----------------
 def _hhmm_to_hms(hhmm: str) -> str:
@@ -221,6 +220,20 @@ class IBKRConfig:
 
 class IBKRProvider(MarketDataProvider):
     provider = Provider.IBKR
+    
+    issuer_capabilities = IssuerCapabilities(
+        symbol=True, exchange=True,
+        currency=True, full_name=True, 
+        sec_type=True, timezone=True,
+        rth_open=True, rth_close=True,
+        cik=False, lei=False
+    )
+
+    equity_capabilities = EquityCapabilities(
+        sector=True, industry=True,
+        dividend_yield=False, pe_ratio=False,
+        eps=False, beta=False, market_cap=False
+    )
 
     def __init__(self, config: IBKRConfig = IBKRConfig()):
         self._cfg = config

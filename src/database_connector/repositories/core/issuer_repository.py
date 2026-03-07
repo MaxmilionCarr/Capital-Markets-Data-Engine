@@ -157,7 +157,7 @@ class IssuerRepository:
         issuer_id: int | None = None,
         cik: str | None = None,
         lei: str | None = None,
-    ) -> Issuer | None:
+    ) -> Issuer:
         if issuer_id is None and cik is None and lei is None:
             raise ValueError("Provide issuer_id or cik or lei")
 
@@ -465,68 +465,74 @@ class EquitiesRepository:
 
     # ---------- ENSURE (high-level convenience) ----------
 
+    # NEED TO FIX THIS TODO
     def get_or_create_ensure(self, *, symbol: str, exchange_name: str) -> Equity | None:
-        """
-        Ensure exchange exists, issuer exists, and equity listing exists for (exchange, symbol).
-        Does at most ONE market_data_service.fetch_ticker() call.
-        """
         exchange_name = exchange_name.strip()
 
-        # 0) Try find exchange first (no service call)
+        # check if exchange exists
         ex = self.hub.exchange_repo.get_info(exchange_name=exchange_name)
 
-        # 1) If exchange exists, we can check equity existence immediately (no service call)
         if ex:
             existing = self.get_by_exchange_symbol(exchange_id=ex.exchange_id, symbol=symbol)
             if existing:
                 return existing
+        else:
+            # need issuer data to create exchange
+            issuer_enriched = self.hub.market_data_service.fetch_issuer_enriched(
+                symbol=symbol,
+                exchange_name=exchange_name
+            )
 
-        # 2) Single provider call (used for: create exchange if missing, and create equity/issuer if missing)
-        tinfo = self.hub.market_data_service.fetch_ticker(symbol=symbol, exchange_name=exchange_name)
-        if not tinfo:
-            return None
-
-        # 3) Ensure exchange exists (create if missing) using provider metadata
-        if not ex:
             ex_id = self.hub.exchange_repo.get_or_create(
                 exchange_name=exchange_name,
-                timezone=getattr(tinfo, "timezone", "UTC"),
-                currency=getattr(tinfo, "currency", "USD"),
-                rth_open=getattr(tinfo, "rth_open", None) or "09:30:00",
-                rth_close=getattr(tinfo, "rth_close", None) or "16:00:00",
+                timezone=issuer_enriched.timezone,
+                currency=issuer_enriched.currency,
+                rth_open=issuer_enriched.rth_open,
+                rth_close=issuer_enriched.rth_close
             )
+
             ex = self.hub.exchange_repo.get_info(exchange_id=ex_id)
+
             if not ex:
                 return None
 
-        # 4) Re-check equity now that we definitely have exchange_id (still no extra service call)
-        existing = self.get_by_exchange_symbol(exchange_id=ex.exchange_id, symbol=symbol)
-        if existing:
-            return existing
-
-        # 5) Resolve issuer (entity-level). Prefer cik/lei; fallback to full_name.
-        issuer_id = self.hub.issuer_repo.get_or_create(
-            full_name=getattr(tinfo, "full_name", None),
-            cik=getattr(tinfo, "cik", None),
-            lei=getattr(tinfo, "lei", None),
+        # fetch equity enrichment
+        equity = self.hub.market_data_service.fetch_equity_enriched(
+            symbol=symbol,
+            exchange_name=exchange_name,
+            currency=ex.currency
         )
 
-        self.create(
-                issuer_id=issuer_id,
-                exchange_id=ex.exchange_id,
-                symbol=getattr(tinfo, "symbol", symbol),
-                full_name=getattr(tinfo, "full_name", None),
-                sector=getattr(tinfo, "sector", None),
-                industry=getattr(tinfo, "industry", None),
-                dividend_yield=getattr(tinfo, "dividend_yield", None),
-                pe_ratio=getattr(tinfo, "pe_ratio", None),
-                eps=getattr(tinfo, "eps", None),
-                beta=getattr(tinfo, "beta", None),
-                market_cap=getattr(tinfo, "market_cap", None),
-            )
-        
-        # 6) Insert equity listing
-        if getattr(tinfo, "sec_type", None) not in SECURITY_TYPES["EQUITY"]:
-            return None      
+        # resolve issuer
+        issuer = self.hub.issuer_repo.get_info(cik=equity.cik, lei=equity.lei)
 
-        return self.get_by_exchange_symbol(exchange_id=ex.exchange_id, symbol=symbol)
+        if issuer:
+            issuer_id = issuer.issuer_id
+        else:
+            issuer_enriched = self.hub.market_data_service.fetch_issuer_enriched(
+                symbol=symbol,
+                exchange_name=exchange_name
+            )
+
+            issuer_id = self.hub.issuer_repo.get_or_create(
+                full_name=issuer_enriched.full_name,
+                cik=issuer_enriched.cik,
+                lei=issuer_enriched.lei,
+            )
+
+        # create equity
+        equity_id = self.create(
+            issuer_id=issuer_id,
+            exchange_id=ex.exchange_id,
+            symbol=equity.symbol,
+            full_name=equity.full_name,
+            sector=equity.sector,
+            industry=equity.industry,
+            dividend_yield=equity.dividend_yield,
+            pe_ratio=equity.pe_ratio,
+            eps=equity.eps,
+            beta=equity.beta,
+            market_cap=equity.market_cap,
+        )
+
+        return self.get_by_id(equity_id=equity_id)
