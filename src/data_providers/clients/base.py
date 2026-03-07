@@ -156,7 +156,7 @@ class EquityBuilder(Builder):
 
     PRIORITY_MAPPING = [
         FieldSpec(name="symbol", provider_priority=[Provider.FMP, Provider.IBKR], required=True),
-        FieldSpec(name="full_name", provider_priority=[Provider.IBKR], required=True),
+        FieldSpec(name="full_name", provider_priority=[Provider.IBKR, Provider.FMP], required=True),
         FieldSpec(name="sector", provider_priority=[Provider.FMP], required=True),
         FieldSpec(name="industry", provider_priority=[Provider.FMP, Provider.IBKR], required=True),
         FieldSpec(name="dividend_yield", provider_priority=[Provider.FMP, Provider.IBKR]),

@@ -254,7 +254,7 @@ class IBKRProvider(MarketDataProvider):
         self._connected = False
 
     # ---- issuer info ----
-    def get_issuer_information(self, symbol: str, exchange_name: Optional[str] = None):
+    def get_issuer_information(self, symbol: str, exchange_name: Optional[str] = None) -> IssuerInfo:
         if not self._connected:
             raise ConnectionError("Not connected to IBKR. Call connect() first.")
 
@@ -285,13 +285,13 @@ class IBKRProvider(MarketDataProvider):
             o, c = _extract_first_session(trading_hours)
 
         return IssuerInfo(
+            provider=self.provider,
             symbol=contract.symbol,
             exchange=getattr(contract, "primaryExchange", None) or None,
             currency=getattr(contract, "currency", None) or None,
             full_name=getattr(d0, "longName", None),
             timezone=getattr(d0, "timeZoneId", None),
             sec_type=contract.secType,
-            provider=self.provider,
             rth_open=o,
             rth_close=c,
         )
@@ -318,6 +318,9 @@ class IBKRProvider(MarketDataProvider):
         d0 = details[0]
 
         return EquityInfo(
+            provider=self.provider,
+            symbol=contract.symbol,
+            full_name=getattr(d0, "longName", None),
             industry=getattr(d0, "industry", None),
             sector=getattr(d0, "category", None),
             dividend_yield=getattr(d0, "dividendYield", None),

@@ -66,8 +66,8 @@ class FMPProvider(FundamentalDataProvider, MarketDataProvider):
         print(entry)
         
         return IssuerInfo(
-            symbol=entry.get("symbol"),
             provider=self.provider,
+            symbol=entry.get("symbol"),
             exchange=entry.get("exchange"),
             currency=entry.get("currency"),
             full_name=entry.get("companyName"),
@@ -100,6 +100,9 @@ class FMPProvider(FundamentalDataProvider, MarketDataProvider):
         print(f"  CIK: {entry.get('cik')}")
         #TODO Change dividend yeidl to dividend amount W
         return EquityInfo(
+            provider=self.provider,
+            symbol=entry.get("symbol"),
+            full_name=entry.get("companyName"),
             sector=entry.get("sector"),
             industry=entry.get("industry"),
             dividend_yield=entry.get("lastDividend"),
