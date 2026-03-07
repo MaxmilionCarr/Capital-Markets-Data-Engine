@@ -8,7 +8,7 @@ import csv
 import os
 
 api_key = os.getenv("FMP_API_KEY")
-db_path = "./tests/database/providers/testing.db"
+db_path = "./tests/database/repositories/testing.db"
 
 def create_test_database():
     database = DataBase(db_path)
@@ -82,7 +82,7 @@ def main(symbols = None, exchange_name = None):
     for eq in first_issuer.get_equities():
         print(eq)
 
-def multi_test(symbols: List[str]):
+def multi_test(symbols: list[str]):
     ibkr_cfg = IBKRConfig(
         host="127.0.0.1",
         port=60000,      # paper / gateway port
@@ -116,12 +116,18 @@ def multi_test(symbols: List[str]):
         print(equity)
     print("\n")
 
+    print("Issuers")
+    for equity in equities:
+        print(equity.issuer)
+
     
 
 
 
 if __name__ == "__main__":
-    create_test_database()
-    main()
+    if not os.path.exists(db_path):
+        create_test_database()
+    symbols = ["AAPL", "GOOGL", "GOOG", "MSFT", "AMZN", "SHOP"]
+    multi_test(symbols)
 
     

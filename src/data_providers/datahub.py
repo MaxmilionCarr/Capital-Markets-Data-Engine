@@ -101,6 +101,10 @@ class PriorityMarket:
                 return s.fetch_equity_prices(*args, **kwargs)
             except (NotSupported, DataNotFound, ProviderError) as e:
                 last = e
+                continue
+            except Exception as e:
+                print(e)
+                continue
         raise last or ProviderError("No market services configured")
 
 

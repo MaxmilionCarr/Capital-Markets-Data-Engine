@@ -7,15 +7,25 @@ import matplotlib.pyplot as plt
 
 load_dotenv()
 
-pacer = _HistPacer(
-    max_10min=100
+test_env_path = os.getenv("TESTING_DATABASE_PATH")
+api_key = os.getenv("FMP_API_KEY")
+ibkr_cfg = IBKRConfig(
+    host="127.0.0.1",
+    port=60000,      # paper / gateway port
+    client_id=1,
 )
 
-test_env_path = os.getenv("TESTING_DATABASE_PATH")
-config = DataHubConfig(
-    market_services=[IBKRService(IBKRConfig())],
-    fundamental_services=[FMPService(FMPConfig(api_key=os.getenv("API_KEY")))]
+fmp_cfg = FMPConfig(
+    api_key=api_key,
 )
+
+
+
+config = DataHubConfig(
+    market_services=(FMPService(fmp_cfg), IBKRService(ibkr_cfg)),
+    fundamental_services=(FMPService(fmp_cfg),)
+)
+
 
 load_dotenv()
 
@@ -77,7 +87,7 @@ if __name__ == "__main__":
     # One month test
     print("----- ONE MONTH TEST -----")
     duration_month, prices_month = time_request_check(
-        ticker_symbol="ORCL",
+        ticker_symbol="GOOGL",
         exchange_name="NASDAQ",
         start_date=start_date,
         end_date=datetime(2024, 7, 31, 16, 0, 0)

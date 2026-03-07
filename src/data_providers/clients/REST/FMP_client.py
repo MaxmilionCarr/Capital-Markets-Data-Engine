@@ -63,7 +63,6 @@ class FMPProvider(FundamentalDataProvider, MarketDataProvider):
                 break
         else:
             raise Exception(f"No issuer information found for {symbol} on exchange {exchange}")
-        print(entry)
         
         return IssuerInfo(
             provider=self.provider,
@@ -90,14 +89,6 @@ class FMPProvider(FundamentalDataProvider, MarketDataProvider):
                 break
         else:
             raise Exception(f"No equity information found for {symbol} on exchange {exchange}")
-        print(entry)
-        print(f"Equity Information for {symbol}:")
-        print(f"  Sector: {entry.get('sector')}")
-        print(f"  Industry: {entry.get('industry')}")
-        print(f"  Dividend Yield: {entry.get('lastDividend')}")
-        print(f"  Beta: {entry.get('beta')}")
-        print(f"  Market Cap: {entry.get('marketCap')}")
-        print(f"  CIK: {entry.get('cik')}")
         #TODO Change dividend yeidl to dividend amount W
         return EquityInfo(
             provider=self.provider,
