@@ -70,7 +70,7 @@ class Hub:
 
     @property
     def equities_repo(self):
-        from .repositories.core.issuer_repository import EquitiesRepository
+        from .repositories.securities.equities_repository import EquitiesRepository
         if self._equities_repo is None:
             self._equities_repo = EquitiesRepository(self.conn, hub=self)
         return self._equities_repo
@@ -123,7 +123,7 @@ class DB:
         return exchange
 
     # Allow for a search without exchange name through a bulk insert
-    from .repositories.core.issuer_repository import Equity
+    from .repositories.securities.equities_repository import Equity
     def get_equity(self, symbol: str, exchange_name: str, *, ensure: bool = False) -> Equity | List[Equity] | None:
         exchange_name = exchange_name.strip()
 

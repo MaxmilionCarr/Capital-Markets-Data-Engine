@@ -102,11 +102,9 @@ if __name__ == "__main__":
         ticker_symbol="TSLA",
         exchange_name="NASDAQ",
         start_date=start_date,
-        end_date=datetime(2025, 12, 1, 16, 0, 0)
+        end_date=datetime(2025, 7, 1, 16, 0, 0)
     )
-    print("----- Prices -----")
-    open("prices_year_9_day.csv", "w").write(prices_year.to_csv())
-    print(prices_year)
+
     
     print("----- SUMMARY OF DURATIONS -----")
 

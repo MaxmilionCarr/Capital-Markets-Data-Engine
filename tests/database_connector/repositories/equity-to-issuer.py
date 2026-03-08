@@ -1,14 +1,16 @@
 from datetime import datetime
 
+import dotenv
 from rpds import List
 from data_providers import  IBKRConfig, IBKRService, DataHubConfig, DataHub, FMPConfig, FMPService
 from database_connector import DB, DataBase
 import pandas as pd
 import csv
 import os
+dotenv.load_dotenv()
 
 api_key = os.getenv("FMP_API_KEY")
-db_path = "./tests/database/repositories/testing.db"
+db_path = os.getenv("TESTING_DATABASE_PATH")
 
 def create_test_database():
     database = DataBase(db_path)
@@ -120,14 +122,43 @@ def multi_test(symbols: list[str]):
     for equity in equities:
         print(equity.issuer)
 
-    
+def test_NYSE():
+    ibkr_cfg = IBKRConfig(
+        host="127.0.0.1",
+        port=60000,      # paper / gateway port
+        client_id=1,
+    )
 
+    fmp_cfg = FMPConfig(
+        api_key=api_key,
+    )
+
+
+
+    datahub_cfg = DataHubConfig(
+        market_services=(FMPService(fmp_cfg), IBKRService(ibkr_cfg)),
+        fundamental_services=(FMPService(fmp_cfg),)
+    )
+
+    db = DB(db_path, datahub_cfg)
+
+    equity = db.get_equity(
+        symbol="ORCL",
+        exchange_name="NYSE",
+        ensure=True
+    )
+
+    print(equity)
 
 
 if __name__ == "__main__":
+    '''
     if not os.path.exists(db_path):
         create_test_database()
     symbols = ["AAPL", "GOOGL", "GOOG", "MSFT", "AMZN", "SHOP"]
+    
     multi_test(symbols)
+    '''
+    test_NYSE()
 
     
