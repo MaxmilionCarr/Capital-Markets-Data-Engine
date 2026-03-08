@@ -4,36 +4,33 @@ import sqlite3 as sql
 from dataclasses import dataclass
 from typing import Optional, List
 from database_connector.db import Hub
-
-EXIT_SUCCESS = 1
-EXIT_FAILURE = 0
-
+from database_connector.repositories.securities.equities_repository import EquitiesRepository
 
 @dataclass
 class Exchange:
     """
     Data class representing an exchange.
     """
-    _id: int
+    exchange_id: int
     name: str
     timezone: str
     currency: str
 
-    # Normal RTH (exchange-local) time-of-day strings: 'HH:MM:SS'
     rth_open: str
     rth_close: str
 
     _hub: Hub
 
-    def get_all_tickers(self):
-        """Return all tickers for this exchange."""
-        return self._hub.ticker_repo.get_by_exchange(self._id)
-
-    def get_ticker(self, ticker_symbol: str = None, *, ensure: bool = False):
-        """Return a specific ticker by symbol for this exchange."""
+    def get_all_equities(self):
+        """Return all equities listed on this exchange."""
+        return self._hub.equities_repo.get_by_exchange(self.exchange_id)
+    
+    def get_equity(self, symbol: str, *, ensure: bool = False):
+        """Return the Equity with this symbol listed on this exchange, or None if not found."""
         if ensure:
-            return self._hub.ticker_repo.get_or_create_ensure(ticker_symbol, exchange_name=self.name)
-        return self._hub.ticker_repo.get_info(exchange_id=self._id, symbol=ticker_symbol)
+            return self._hub.equities_repo.get_or_create_ensure(symbol=symbol, exchange_name=self.name)
+        else:
+            return self._hub.equities_repo.get_by_exchange_symbol(self.exchange_id, symbol)
 
 
 class ExchangeRepository:
@@ -63,8 +60,8 @@ class ExchangeRepository:
         rows = cur.fetchall()
         return [Exchange(*row, _hub=self.hub) for row in rows]
 
-    def get_info(self, *, exchange_id: int | None = None, exchange_name: str | None = None) -> Exchange:
-        """Return a single Exchange object. Raises if not found."""
+    def get_info(self, *, exchange_id: int | None = None, exchange_name: str | None = None) -> Exchange | None:
+        """Return a single Exchange object. Returns None if not found."""
         if (exchange_id is None) == (exchange_name is None):
             raise ValueError("Provide exactly one of exchange_id or exchange_name")
 
@@ -88,7 +85,7 @@ class ExchangeRepository:
 
         row = cur.fetchone()
         if row is None:
-            raise sql.Error("No exchange found with the given identifier.")
+            return None
 
         return Exchange(*row, _hub=self.hub)
 
@@ -136,7 +133,9 @@ class ExchangeRepository:
             raise ValueError("exchange_name must be provided")
 
         try:
-            return self.get_info(exchange_name=exchange_name)._id
+            info = self.get_info(exchange_name=exchange_name)
+            if info is not None:
+                return info.exchange_id
         except sql.Error:
             pass
 

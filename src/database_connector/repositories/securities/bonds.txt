@@ -1,0 +1,3 @@
+When querying for company notes, do it by symbol but attach the bond data to an issuer id, not equity. This way the bonds Are
+relevant only to the issuer but can be queried from any known issuer entity. (GOOGL and GOOG) should provide the same notes despite
+being "Different" equity securities.

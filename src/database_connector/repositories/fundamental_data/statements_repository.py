@@ -21,7 +21,7 @@ class Statement:
     Represents one row in the `statements` table.
     """
     _id: int
-    _ticker_id: int
+    _issuer_id: int
     type: str
     period: str
     fiscal_date: str
@@ -36,12 +36,12 @@ class StatementRepository:
     Expected schema:
 
         id INTEGER PRIMARY KEY,
-        ticker_id INTEGER NOT NULL REFERENCES tickers(ticker_id) ON DELETE CASCADE,
+        issuer_id INTEGER NOT NULL REFERENCES issuers(issuer_id) ON DELETE CASCADE,
         type TEXT NOT NULL,
         period TEXT NOT NULL,
         fiscal_date TEXT NOT NULL,     -- ISO YYYY-MM-DD
         statement TEXT NOT NULL,       -- JSON
-        UNIQUE(ticker_id, type, period, fiscal_date)
+        UNIQUE(issuer_id, type, period, fiscal_date)
     """
 
     def __init__(self, connection: sql.Connection, hub: Hub):
@@ -55,7 +55,7 @@ class StatementRepository:
 
     def get_statements(
         self,
-        ticker_id: int,
+        issuer_id: int,
         statement_type: STATEMENT_TYPES,
         period: PERIODS,
         count: int = 1,
@@ -66,20 +66,20 @@ class StatementRepository:
         cur = self.connection.cursor()
         cur.execute(
             """
-            SELECT id, ticker_id, type, period, fiscal_date, statement
+            SELECT id, issuer_id, type, period, fiscal_date, statement
             FROM statements
-            WHERE ticker_id = ? AND type = ? AND period = ?
+            WHERE issuer_id = ? AND type = ? AND period = ?
             ORDER BY fiscal_date DESC
             LIMIT ?
             """,
-            (ticker_id, statement_type, period, count),
+            (issuer_id, statement_type, period, count),
         )
         rows = cur.fetchall()
 
         return [
             Statement(
                 _id=r[0],
-                _ticker_id=r[1],
+                _issuer_id=r[1],
                 type=r[2],
                 period=r[3],
                 fiscal_date=r[4],
@@ -95,7 +95,7 @@ class StatementRepository:
 
     def upsert_statement(
         self,
-        ticker_id: int,
+        issuer_id: int,
         statement_type: STATEMENT_TYPES,
         period: PERIODS,
         fiscal_date: str,
@@ -107,12 +107,12 @@ class StatementRepository:
         cur = self.connection.cursor()
         cur.execute(
             """
-            INSERT INTO statements (ticker_id, type, period, fiscal_date, statement)
+            INSERT INTO statements (issuer_id, type, period, fiscal_date, statement)
             VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(ticker_id, type, period, fiscal_date)
+            ON CONFLICT(issuer_id, type, period, fiscal_date)
             DO UPDATE SET statement = excluded.statement
             """,
-            (ticker_id, statement_type, period, fiscal_date, json.dumps(statement)),
+            (issuer_id, statement_type, period, fiscal_date, json.dumps(statement)),
         )
         self.connection.commit()
 
@@ -122,7 +122,7 @@ class StatementRepository:
 
     def ensure_statements(
         self,
-        ticker_id: int,
+        issuer_id: int,
         statement_type: STATEMENT_TYPES,
         period: PERIODS,
         count: int,
@@ -133,7 +133,7 @@ class StatementRepository:
         """
 
         # 1) Get what we already have
-        existing = self.get_statements(ticker_id, statement_type, period, count)
+        existing = self.get_statements(issuer_id, statement_type, period, count)
         existing_dates = {s.fiscal_date for s in existing}
 
         # If we already have enough, return them
@@ -142,14 +142,23 @@ class StatementRepository:
 
         print("Refetch requested")
         # 2) Fetch from service
-        symbol = self.hub.ticker_repo.get_symbol_by_id(ticker_id)
+        issuer = self.hub.issuer_repo.get_info(issuer_id=issuer_id)
+        equities = issuer.get_equities()
+        for equity in equities:
+            symbol = equity.symbol
+            exchange_name = equity.exchange.name
 
-        fetched = self.hub.fundamental_data_service.fetch_statement(
-            symbol,
-            statement_type,
-            count,        # service expected to return most recent N
-            period,
-        ) or []
+            try:
+                fetched = self.hub.fundamental_data_service.fetch_statement(
+                    symbol,
+                    statement_type,
+                    count,        # service expected to return most recent N
+                    period,
+                ) or []
+                break  # stop after first successful fetch
+            except Exception as e:
+                print(f"Error fetching {statement_type} for {symbol} on {exchange_name}: {e}")
+                continue
 
         # 3) Upsert everything fetched (override safe)
         for st in fetched[:count]:
@@ -157,7 +166,7 @@ class StatementRepository:
             if not fiscal_date:
                 continue
             self.upsert_statement(
-                ticker_id,
+                issuer_id,
                 statement_type,
                 period,
                 fiscal_date,
@@ -165,15 +174,15 @@ class StatementRepository:
             )
 
         # 4) Return newest N from DB
-        return self.get_statements(ticker_id, statement_type, period, count)
+        return self.get_statements(issuer_id, statement_type, period, count)
 
     # ============================================================
     # DELETE
     # ============================================================
 
-    def delete_by_ticker(self, ticker_id: int) -> int:
+    def delete_by_issuer(self, issuer_id: int) -> int:
         cur = self.connection.cursor()
-        cur.execute("DELETE FROM statements WHERE ticker_id = ?", (ticker_id,))
+        cur.execute("DELETE FROM statements WHERE issuer_id = ?", (issuer_id,))
         self.connection.commit()
         return int(cur.rowcount)
 
@@ -186,16 +195,16 @@ class StatementRepository:
         cur.execute("SELECT period, COUNT(*) FROM statements GROUP BY period")
         return cur.fetchall()
 
-    def debug_latest_rows(self, ticker_id: int, n: int = 5):
+    def debug_latest_rows(self, issuer_id: int, n: int = 5):
         cur = self.connection.cursor()
         cur.execute(
             """
             SELECT fiscal_date, type, period
             FROM statements
-            WHERE ticker_id = ?
+            WHERE issuer_id = ?
             ORDER BY fiscal_date DESC
             LIMIT ?
             """,
-            (ticker_id, n),
+            (issuer_id, n),
         )
         return cur.fetchall()

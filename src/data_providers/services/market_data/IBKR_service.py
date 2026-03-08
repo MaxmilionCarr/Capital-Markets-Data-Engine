@@ -6,11 +6,14 @@ from typing import List, Literal, Optional
 import pandas as pd
 from datetime import datetime, time
 
-from data_providers.clients.IBKR_client import IBKRConfig, IBKRProvider
-from data_providers.clients.base import TickerInfo, EquityInfo
+from data_providers.clients import IBKRConfig, IBKRProvider
+from data_providers.clients.base import IssuerInfo, EquityInfo
 
 
 class IBKRService:
+    name = "IBKR"
+    issuer_capabilities = IBKRProvider.issuer_capabilities
+    equity_capabilities = IBKRProvider.equity_capabilities
     def __init__(self, config: IBKRConfig):
         self._config = config
         self._client = IBKRProvider(config)
@@ -71,9 +74,9 @@ class IBKRService:
     # Service API
     # -------------------------
 
-    def fetch_ticker(self, symbol: str, exchange_name: str = None) -> TickerInfo | List[TickerInfo]:
+    def fetch_issuer(self, symbol: str, exchange_name: str = None) -> IssuerInfo | List[IssuerInfo]:
         self._ensure_connected()
-        return self._client.get_ticker_information(symbol, exchange_name)
+        return self._client.get_issuer_information(symbol, exchange_name)
 
     def fetch_equity(self, symbol: str, exchange_name: str = None, currency: str = None) -> EquityInfo:
         self._ensure_connected()
@@ -100,6 +103,7 @@ class IBKRService:
             rth_close=rth_close,
         )
 
+    #TODO
     def fetch_bond(self, symbol):
         self._ensure_connected()
         return self._client.get_bond(symbol)

@@ -1,15 +1,11 @@
 # TODO: need a better name for this top level access. This is where users will get all their data from
-# FIXME: need to handle connection closing better in handling duplicate creations
 from __future__ import annotations
 import sqlite3 as sql
 from typing import Any, List, Literal
 import os
 from dataclasses import dataclass, field
-from functools import cached_property
 
 from data_providers import FMPConfig, IBKRConfig, IBKRService, FMPService, DataHubConfig, DataHub
-from data_providers.datahub import PriorityMarket
-#from .data.services.IBKR_service import IBKRService
 
 try:
     from dotenv import load_dotenv
@@ -32,7 +28,7 @@ class Hub:
         self._fundamental_data_service = None
 
         self._exchange_repo = None
-        self._ticker_repo = None
+        self._issuer_repo = None
         self._equities_repo = None
         self._equity_prices_repo = None
         
@@ -62,15 +58,15 @@ class Hub:
         return self._exchange_repo
     
     @property
-    def ticker_repo(self):
-        from .repositories.instruments.ticker_repository import TickerRepository
-        if self._ticker_repo is None:
-            self._ticker_repo = TickerRepository(self.conn, hub=self)
-        return self._ticker_repo
+    def issuer_repo(self):
+        from .repositories.core.issuer_repository import IssuerRepository
+        if self._issuer_repo is None:
+            self._issuer_repo = IssuerRepository(self.conn, hub=self)
+        return self._issuer_repo
 
     @property
     def equities_repo(self):
-        from .repositories.instruments.ticker_repository import EquitiesRepository
+        from .repositories.securities.equities_repository import EquitiesRepository
         if self._equities_repo is None:
             self._equities_repo = EquitiesRepository(self.conn, hub=self)
         return self._equities_repo
@@ -100,7 +96,6 @@ class DB:
     def __post_init__(self):
         self._connection = sql.connect(self.db_path)
         self._connection.execute("PRAGMA foreign_keys = ON")
-        # strongly recommended for your workload:
         self._connection.execute("PRAGMA journal_mode = WAL")
         self._hub = Hub(self._connection, self.config)
 
@@ -113,7 +108,7 @@ class DB:
     def get_exchange_id(self, exchange_name: str) -> int | None:
         exchange = self._hub.exchange_repo.get_info(exchange_name = exchange_name)
         if exchange is not None:
-            return exchange._id
+            return exchange.exchange_id
         return None
     
     def get_exchange(self, exchange_name: str):
@@ -123,25 +118,23 @@ class DB:
         return exchange
 
     # Allow for a search without exchange name through a bulk insert
-    from .repositories.instruments.ticker_repository import Ticker  
-    def get_ticker(self, symbol: str, exchange_name: str, *, ensure: bool = False) -> Ticker | List[Ticker]:
+    from .repositories.securities.equities_repository import Equity
+    def get_equity(self, symbol: str, exchange_name: str, *, ensure: bool = False) -> Equity | List[Equity] | None:
         exchange_name = exchange_name.strip()
 
         if not ensure:
             exchange_id = self.get_exchange_id(exchange_name)
             if not exchange_id:
                 raise sql.Error(f"Exchange '{exchange_name}' not found")
-            t = self._hub.ticker_repo.get_info(exchange_id=exchange_id, symbol=symbol)
+            t = self._hub.equities_repo.get_by_exchange_symbol(exchange_id, symbol)
             if t is None:
-                raise sql.Error(f"Ticker '{symbol}' not found on exchange '{exchange_name}'")
+                raise sql.Error(f"Equity '{symbol}' not found on exchange '{exchange_name}'")
             return t
 
         # ensure=True:
-        return self._hub.ticker_repo.get_or_create_ensure(symbol=symbol, exchange_name=exchange_name)
+        return self._hub.equities_repo.get_or_create_ensure(symbol=symbol, exchange_name=exchange_name)
 
-# FIXME
 class DataBase:
-    # TODO: add flow down identifiers for exchange, market when creating tickers so don't have to ladder up
     def __init__(self, db_path=env_path):
         self.path = db_path
         self.connection = sql.connect(db_path)
@@ -171,36 +164,35 @@ class DataBase:
                     )''')
         cur.execute('''CREATE INDEX IF NOT EXISTS idx_exchanges_name ON exchanges (exchange_name)''')
         
-        # --- Ticker Tables ---
-        
-        cur.execute('''CREATE TABLE IF NOT EXISTS underlyings (
-                        underlying_id INTEGER PRIMARY KEY,
-                        symbol TEXT NOT NULL UNIQUE
-                    );''')
+        # --- Issuer Tables ---
         
         # Change this so that tickers doesn't need exchange, equities instead should
-        cur.execute('''CREATE TABLE IF NOT EXISTS tickers (
-                        ticker_id INTEGER PRIMARY KEY,
-                        underlying_id INTEGER NOT NULL,
-                        exchange_id INTEGER NOT NULL,
-
-                        symbol TEXT NOT NULL,
+        cur.execute('''CREATE TABLE IF NOT EXISTS issuers (
+                        issuer_id INTEGER PRIMARY KEY,
                         full_name TEXT,
-                        
-                        source TEXT NOT NULL,
-
-                        UNIQUE(symbol, exchange_id),
-                        FOREIGN KEY (exchange_id) REFERENCES exchanges(exchange_id) ON DELETE CASCADE,
-                        FOREIGN KEY (underlying_id) REFERENCES underlyings(underlying_id) ON DELETE CASCADE
-                    );''')
+                        cik TEXT UNIQUE,
+                        lei TEXT UNIQUE
+                    );
+                    ''')
+        cur.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_issuers_cik ON issuers(cik);
+                    '''
+                    )
+        cur.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_issuers_lei ON issuers(lei);   
+                    
+                    ''')
         
         # --- Security Type ---
         
         # -- Equity Table --
         cur.execute('''CREATE TABLE IF NOT EXISTS equities (
                         equity_id INTEGER PRIMARY KEY,
-                        ticker_id INTEGER NOT NULL,
+                        issuer_id INTEGER NOT NULL,
+                        exchange_id INTEGER NOT NULL,
 
+                        symbol TEXT NOT NULL,
+                        full_name TEXT,
                         sector TEXT,
                         industry TEXT,
                         dividend_yield REAL,
@@ -209,8 +201,13 @@ class DataBase:
                         beta REAL,
                         market_cap REAL,
                         
-                        FOREIGN KEY (ticker_id) REFERENCES tickers(ticker_id) ON DELETE CASCADE
+                        FOREIGN KEY (issuer_id) REFERENCES issuers(issuer_id) ON DELETE CASCADE,
+                        FOREIGN KEY (exchange_id) REFERENCES exchanges(exchange_id) ON DELETE CASCADE
                     );''')
+        
+        cur.execute('''CREATE UNIQUE INDEX IF NOT EXISTS uq_equities_exchange_symbol
+                        ON equities(exchange_id, symbol);
+                    ''')
         
         cur.execute('''CREATE TABLE IF NOT EXISTS equity_intraday_coverage (
                         equity_id INTEGER NOT NULL,
@@ -266,12 +263,12 @@ class DataBase:
 
         cur.execute('''CREATE TABLE IF NOT EXISTS statements (
                     id INTEGER PRIMARY KEY,
-                    ticker_id INTEGER NOT NULL REFERENCES tickers(ticker_id) ON DELETE CASCADE,
+                    issuer_id INTEGER NOT NULL REFERENCES issuers(issuer_id) ON DELETE CASCADE,
                     type TEXT NOT NULL,  -- 'income_statement', 'balance_sheet', 'cash_flow'
                     period TEXT NOT NULL,  -- 'annual' or 'quarterly'
                     fiscal_date DATETIME NOT NULL,
                     statement JSON NOT NULL,
-                    UNIQUE(ticker_id, type, period, fiscal_date)
+                    UNIQUE(issuer_id, type, period, fiscal_date)
                     )''')
 
         
@@ -300,7 +297,7 @@ class DataBase:
     def close_db(self):
         self.connection.close()
 
-    # Figure out a persistent schema migration
+    # TODO: Figure out a persistent schema migration
     '''
     def update_schema(self, table, updated_schema):
         con = self.connection

@@ -7,7 +7,7 @@ from typing import Literal
 import pandas as pd
 
 from database_connector.db import Hub
-from database_connector.repositories.instruments.ticker_repository import Equity
+from database_connector.repositories.securities.equities_repository import Equity
 
 
 # -------------------------------------------------
@@ -43,13 +43,38 @@ def _day_is_weekday(d: date) -> bool:
 
 def _get_exchange_rth(equity: Equity) -> tuple[time, time]:
     """
-    Pull RTH bounds from your Exchange model.
+    Pull RTH bounds from your Exchange model (via equity.exchange / exchange_id).
     Fallback only if Exchange is missing/blank.
     """
-    ex = equity._ticker.get_exchange()
+    ex = getattr(equity, "exchange", None)
+    if callable(ex):
+        ex = ex()
+
+    if ex is None:
+        # fallback: try via hub if your Equity has _hub + exchange_id
+        hub = equity._hub
+        ex_id = getattr(equity, "exchange_id", None)
+        if hub is not None and ex_id is not None:
+            ex = hub.exchange_repo.get_info(exchange_id=ex_id)
+
     if ex and getattr(ex, "rth_open", None) and getattr(ex, "rth_close", None):
         return _parse_hms(ex.rth_open), _parse_hms(ex.rth_close)
+
     return time(9, 30), time(16, 0)
+
+
+def _exchange_name_from_equity(equity: Equity) -> str:
+    ex = getattr(equity, "exchange", None)
+    if callable(ex):
+        ex = ex()
+    if ex is None:
+        hub = equity._hub
+        ex_id = getattr(equity, "exchange_id", None)
+        if hub is not None and ex_id is not None:
+            ex = hub.exchange_repo.get_info(exchange_id=ex_id)
+    if not ex:
+        return "SMART"
+    return getattr(ex, "name", None) or getattr(ex, "exchange_name", None) or "SMART"
 
 
 # -------------------------------------------------
@@ -84,7 +109,7 @@ class EquityPricesRepository:
                   AND date(datetime) BETWEEN ? AND ?
                 ORDER BY date
                 """,
-                (equity._id, start, end),
+                (equity.equity_id, start, end),
             )
         else:
             cur.execute(
@@ -96,7 +121,7 @@ class EquityPricesRepository:
                   AND date(datetime) >= ?
                 ORDER BY date
                 """,
-                (equity._id, start),
+                (equity.equity_id, start),
             )
 
         return pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
@@ -115,7 +140,7 @@ class EquityPricesRepository:
                   AND datetime BETWEEN ? AND ?
                 ORDER BY datetime
                 """,
-                (equity._id, start, end),
+                (equity.equity_id, start, end),
             )
         else:
             cur.execute(
@@ -127,7 +152,7 @@ class EquityPricesRepository:
                   AND datetime >= ?
                 ORDER BY datetime
                 """,
-                (equity._id, start),
+                (equity.equity_id, start),
             )
 
         return pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
@@ -152,7 +177,7 @@ class EquityPricesRepository:
               AND period = ?
               AND provider = ?
             """,
-            (equity._id, d, period, provider),
+            (equity.equity_id, d, period, provider),
         )
         row = cur.fetchone()
         return row[0] if row else None
@@ -164,7 +189,6 @@ class EquityPricesRepository:
     # COVERAGE UPDATE
     # =================================================
 
-    # TODO: Provide error handling so that errors work as failed
     def update_intraday_coverage(
         self,
         *,
@@ -224,7 +248,7 @@ class EquityPricesRepository:
                         rows = excluded.rows,
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    (equity._id, cur_day, period, status, provider, rows),
+                    (equity.equity_id, cur_day, period, status, provider, rows),
                 )
 
             cur_day += timedelta(days=1)
@@ -261,17 +285,18 @@ class EquityPricesRepository:
                         rows = excluded.rows,
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    (equity._id, cur_day, period, status, provider, rows),
+                    (equity.equity_id, cur_day, period, status, provider, rows),
                 )
 
             cur_day += timedelta(days=1)
 
         self.connection.commit()
+
     # =================================================
     # INSERT
     # =================================================
 
-    def _insert_all(self, equity, period, df: pd.DataFrame):
+    def _insert_all(self, equity: Equity, period: str, df: pd.DataFrame):
         if df is None or df.empty:
             return
 
@@ -289,7 +314,7 @@ class EquityPricesRepository:
 
         rows = [
             (
-                equity._id,
+                equity.equity_id,
                 r.datetime.to_pydatetime(),
                 r.open,
                 r.high,
@@ -320,6 +345,7 @@ class EquityPricesRepository:
     # ENSURE
     # =================================================
 
+    # NEED CURRENCY HERE TODO
     def get_or_create_ensure(
         self,
         equity: Equity,
@@ -336,17 +362,17 @@ class EquityPricesRepository:
             raise ValueError("Invalid date range")
 
         rth_open, rth_close = _get_exchange_rth(equity)
+        exchange_name = _exchange_name_from_equity(equity)
 
         existing = self.get_prices(equity, period, start_date, end_date)
 
         # -------- First fill --------
         if existing.empty:
-            print(f"No existing data for {equity._ticker.symbol} {period} from {start_date} to {end_date}, fetching...")
-            df = None
+            print(f"No existing data for {equity.symbol} {period} from {start_date} to {end_date}, fetching...")
             try:
                 df = self.hub.market_data_service.fetch_equity_prices(
-                    equity._ticker.symbol,
-                    equity._ticker.get_exchange().name,
+                    equity.symbol,
+                    exchange_name,
                     start_date,
                     end_date,
                     bar_size=period,
@@ -354,7 +380,7 @@ class EquityPricesRepository:
                     rth_close=rth_close,
                 )
             except Exception as e:
-                print(f"Error fetching prices for {equity._ticker.symbol} from {start_date} to {end_date}: {e}")
+                print(f"Error fetching prices for {equity.symbol} from {start_date} to {end_date}: {e}")
                 self.update_intraday_coverage_failed(
                     equity=equity,
                     period=period,
@@ -365,7 +391,6 @@ class EquityPricesRepository:
                 return self.get_prices(equity, period, start_date, end_date)
             else:
                 self._insert_all(equity, period, df)
-
                 self.update_intraday_coverage(
                     equity=equity,
                     df=df,
@@ -374,8 +399,7 @@ class EquityPricesRepository:
                     start=start_date,
                     end=end_date,
                 )
-
-            return self.get_prices(equity, period, start_date, end_date)
+                return self.get_prices(equity, period, start_date, end_date)
 
         # -------- Find missing weekdays (but don’t refetch if coverage says closed/partial/ok) --------
         existing["dt"] = pd.to_datetime(existing["date"])
@@ -407,8 +431,7 @@ class EquityPricesRepository:
             gap = (cur_d - prev_d).days
             if gap == 1:
                 return True
-            # this is the actual reason you were splitting: Fri->Mon is 3
-            if gap <= 3:
+            if gap <= 3:  # bridge weekend Fri->Mon
                 return True
             return False
 
@@ -418,36 +441,29 @@ class EquityPricesRepository:
                 continue
 
             windows.append(
-                (
-                    datetime.combine(run_s, rth_open),
-                    datetime.combine(prev, rth_close),
-                )
+                (datetime.combine(run_s, rth_open), datetime.combine(prev, rth_close))
             )
             run_s = prev = d
 
         windows.append(
-            (
-                datetime.combine(run_s, rth_open),
-                datetime.combine(prev, rth_close),
-            )
+            (datetime.combine(run_s, rth_open), datetime.combine(prev, rth_close))
         )
 
         # -------- Fetch those bigger windows --------
         for s, e in windows:
-            df = None
-            print(f"Fetching missing window for {equity._ticker.symbol} {period} from {s} to {e}...")
+            print(f"Fetching missing window for {equity.symbol} {period} from {s} to {e}...")
             try:
                 df = self.hub.market_data_service.fetch_equity_prices(
-                    equity._ticker.symbol,
-                    equity._ticker.get_exchange().name,
+                    equity.symbol,
+                    exchange_name,
                     start_date=s,
                     end_date=e,
                     bar_size=period,
                     rth_open=rth_open,
                     rth_close=rth_close,
                 )
-            except Exception as e:
-                print(f"Error fetching prices for {equity._ticker.symbol} from {s} to {e}: {e}")
+            except Exception as err:
+                print(f"Error fetching prices for {equity.symbol} from {s} to {e}: {err}")
                 self.update_intraday_coverage_failed(
                     equity=equity,
                     period=period,
@@ -458,7 +474,6 @@ class EquityPricesRepository:
                 continue
             else:
                 self._insert_all(equity, period, df)
-
                 self.update_intraday_coverage(
                     equity=equity,
                     df=df,

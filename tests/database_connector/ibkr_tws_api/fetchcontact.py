@@ -17,6 +17,8 @@ SYMBOLS = [
     {"symbol": "NVDA", "type": "Stock"},
     {"symbol": "SHOP", "type": "Stock"},
     {"symbol": "SPY", "type": "Stock"},
+    {"symbol": "GOOGL", "type": "Stock"},
+    {"symbol": "GOOG", "type": "Stock"},
 ]
 
 
