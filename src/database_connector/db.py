@@ -1,15 +1,11 @@
 # TODO: need a better name for this top level access. This is where users will get all their data from
-# FIXME: need to handle connection closing better in handling duplicate creations
 from __future__ import annotations
 import sqlite3 as sql
 from typing import Any, List, Literal
 import os
 from dataclasses import dataclass, field
-from functools import cached_property
 
 from data_providers import FMPConfig, IBKRConfig, IBKRService, FMPService, DataHubConfig, DataHub
-from data_providers.datahub import PriorityMarket
-#from .data.services.IBKR_service import IBKRService
 
 try:
     from dotenv import load_dotenv
@@ -100,7 +96,6 @@ class DB:
     def __post_init__(self):
         self._connection = sql.connect(self.db_path)
         self._connection.execute("PRAGMA foreign_keys = ON")
-        # strongly recommended for your workload:
         self._connection.execute("PRAGMA journal_mode = WAL")
         self._hub = Hub(self._connection, self.config)
 
@@ -139,9 +134,7 @@ class DB:
         # ensure=True:
         return self._hub.equities_repo.get_or_create_ensure(symbol=symbol, exchange_name=exchange_name)
 
-# FIXME
 class DataBase:
-    # TODO: add flow down identifiers for exchange, market when creating tickers so don't have to ladder up
     def __init__(self, db_path=env_path):
         self.path = db_path
         self.connection = sql.connect(db_path)
@@ -304,7 +297,7 @@ class DataBase:
     def close_db(self):
         self.connection.close()
 
-    # Figure out a persistent schema migration
+    # TODO: Figure out a persistent schema migration
     '''
     def update_schema(self, table, updated_schema):
         con = self.connection

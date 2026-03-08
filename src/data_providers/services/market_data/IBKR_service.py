@@ -103,6 +103,7 @@ class IBKRService:
             rth_close=rth_close,
         )
 
+    #TODO
     def fetch_bond(self, symbol):
         self._ensure_connected()
         return self._client.get_bond(symbol)

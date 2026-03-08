@@ -1,7 +1,7 @@
 from typing import List, Literal
 from data_providers.clients import FMPConfig, FMPProvider
 from data_providers.clients.base import IssuerInfo, EquityInfo
-#from data_providers.exceptions import NotSupported, ProviderError, DataNotFound
+from data_providers.exceptions import NotSupported, ProviderError, DataNotFound
 import pandas as pd
 from datetime import datetime, time, timedelta
 
@@ -18,6 +18,9 @@ class FMPService:
 
     def fetch_equity(self, symbol: str, exchange_name: str | None = None, currency: str | None = None) -> EquityInfo:
         return self._client.get_equity_information(symbol, exchange_name)
+    
+    def fetch_equity_prices(self, symbol: str, exchange_name: str | None = None, currency: str | None = None, start_date: datetime | None = None, end_date: datetime | None = None) -> pd.DataFrame:
+        raise(NotSupported)
 
     # Service Functions
     def fetch_income_statement(self, symbol: str, prev_years: int, period: str) -> pd.DataFrame:
