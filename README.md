@@ -1,6 +1,6 @@
-# The Financial Data API Integration Tool (DataHub)
+# Capital Markets Data Engine
 
-**DataHub** is a provider-agnostic financial data orchestration and
+This **Project** is a provider-agnostic financial data orchestration and
 storage framework designed to ingest, enrich, and store market and
 fundamental data from multiple financial data providers.
 
