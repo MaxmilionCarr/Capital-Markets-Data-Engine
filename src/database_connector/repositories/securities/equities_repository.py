@@ -22,6 +22,9 @@ SECURITY_TYPES = {
     # Add more as needed
 }
 
+# TODO: need to add an enriched state if all fields are filled so ensure can happily skip over or fill if fields are missing that current providers do not provide
+# TODO: Add override for get_or_create_ensure or make get_or_create_override that forces overwrite of existing data with new data from provider, for cases where provider data is more complete than existing data and we want to update it. Or add an enrichment method that fills in missing fields without overwriting existing fields. Need to be careful with this though as it can lead to data quality issues if providers have conflicting data. Maybe best to just have a manual review process for updating existing data rather than automatic overwriting.
+
 @dataclass
 class Equity:
     equity_id: int
