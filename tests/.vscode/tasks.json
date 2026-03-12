@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build & Run C++",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "script.cpp",
+        "-o",
+        "script.exe"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "detail": "Compile and run C++"
+    }
+  ]
+}

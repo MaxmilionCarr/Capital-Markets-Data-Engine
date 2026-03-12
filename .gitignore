@@ -5,6 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
+venv
 
 # Distribution / packaging
 .Python
@@ -25,6 +26,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+./database/*.db
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -50,6 +53,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+*.csv
 
 # Translations
 *.mo
@@ -107,7 +111,6 @@ ipython_config.py
 #   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
 #poetry.lock
 #poetry.toml
-venv
 
 # pdm
 #   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
