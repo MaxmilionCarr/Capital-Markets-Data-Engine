@@ -41,9 +41,7 @@ class PriorityMarket:
                 print("Got info", info)
                 received_any_data = True
             except (NotSupported, DataNotFound, ProviderError) as e:
-                print(f"{s.name} failed to fetch issuer: {e}")
-                last = e
-                continue
+                raise(e)
 
             base.merge_data(info)
             print("Merged to base", base)
@@ -143,8 +141,15 @@ class DataHubConfig:
 
 # ---- DataHub: DB-free core ----
 class DataHub:
+
+    #TODO: base on priority reference for each service type
+    def _compute_provider_identifier(config: DataHubConfig) -> str:
+        # create a unique identifier for this combination of services
+        pass
+
     def __init__(self, config: DataHubConfig):
         self.config = config
+        self.provider_identifier = self._compute_provider_identifier()
 
         self.market = PriorityMarket(config.market_services) if config.market_services else None
         self.fundamentals = PriorityFundamentals(config.fundamental_services) if config.fundamental_services else None

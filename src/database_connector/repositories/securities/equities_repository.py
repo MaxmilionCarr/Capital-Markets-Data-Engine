@@ -64,8 +64,8 @@ class Equity:
             return repo.get_prices(
                 equity=self,
                 period=period,
-                start_date=start_date,
-                end_date=end_date or datetime.now(),
+                start=start_date,
+                end=end_date or datetime.now(),
             )
         return repo.get_or_create_ensure(
             equity=self,

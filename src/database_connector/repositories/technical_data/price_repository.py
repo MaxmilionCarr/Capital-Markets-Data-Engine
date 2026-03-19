@@ -346,6 +346,7 @@ class EquityPricesRepository:
     # =================================================
 
     # NEED CURRENCY HERE TODO
+    # TODO: When a ticker returns error/timesout, assume IPO/missing data. 
     def get_or_create_ensure(
         self,
         equity: Equity,

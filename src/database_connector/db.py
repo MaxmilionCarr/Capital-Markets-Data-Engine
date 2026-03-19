@@ -126,7 +126,7 @@ class DB:
             exchange_id = self.get_exchange_id(exchange_name)
             if not exchange_id:
                 raise sql.Error(f"Exchange '{exchange_name}' not found")
-            t = self._hub.equities_repo.get_by_exchange_symbol(exchange_id, symbol)
+            t = self._hub.equities_repo.get_by_exchange_symbol(exchange_id=exchange_id, symbol=symbol)
             if t is None:
                 raise sql.Error(f"Equity '{symbol}' not found on exchange '{exchange_name}'")
             return t
@@ -153,6 +153,7 @@ class DataBase:
         con = self.connection
         cur = con.cursor()
 
+
         # --- Core Reference Tables ---
         cur.execute('''CREATE TABLE IF NOT EXISTS exchanges (
                         exchange_id INTEGER PRIMARY KEY,
@@ -160,8 +161,10 @@ class DataBase:
                         timezone TEXT NOT NULL,
                         currency TEXT NOT NULL,
                         rth_open TEXT NOT NULL,
-                        rth_close TEXT NOT NULL
-                    )''')
+                        rth_close TEXT NOT NULL,
+                        provider_identifier TEXT NOT NULL
+                    );
+                    ''')
         cur.execute('''CREATE INDEX IF NOT EXISTS idx_exchanges_name ON exchanges (exchange_name)''')
         
         # --- Issuer Tables ---
@@ -171,9 +174,11 @@ class DataBase:
                         issuer_id INTEGER PRIMARY KEY,
                         full_name TEXT,
                         cik TEXT UNIQUE,
-                        lei TEXT UNIQUE
+                        lei TEXT UNIQUE,
+                        provider_identifier TEXT NOT NULL
                     );
                     ''')
+        
         cur.execute('''
                     CREATE INDEX IF NOT EXISTS idx_issuers_cik ON issuers(cik);
                     '''
@@ -200,7 +205,8 @@ class DataBase:
                         eps REAL,
                         beta REAL,
                         market_cap REAL,
-                        
+                        provider_identifier TEXT NOT NULL,
+
                         FOREIGN KEY (issuer_id) REFERENCES issuers(issuer_id) ON DELETE CASCADE,
                         FOREIGN KEY (exchange_id) REFERENCES exchanges(exchange_id) ON DELETE CASCADE
                     );''')
@@ -220,6 +226,12 @@ class DataBase:
                         PRIMARY KEY (equity_id, date, period, provider)
                     );''')
         
+        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_daily_provider (
+                        equity_id INTEGER NOT NULL,
+                        provider_identifier TEXT NOT NULL,
+                        last_updated DATETIME NOT NULL
+                    );''')
+
         cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_daily (
                         equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
                         datetime DATETIME NOT NULL,
@@ -231,6 +243,12 @@ class DataBase:
                         PRIMARY KEY (equity_id, datetime)
                     )''')
 
+        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_hourly_provider (
+                        equity_id INTEGER NOT NULL,
+                        provider_identifier TEXT NOT NULL,
+                        last_updated DATETIME NOT NULL
+                    );''')
+        
         cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_hourly (
                         equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
                         datetime DATETIME NOT NULL,
@@ -241,6 +259,12 @@ class DataBase:
                         volume INTEGER,
                         PRIMARY KEY (equity_id, datetime)
                     )''')
+        
+        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_five_minute_provider (
+                        equity_id INTEGER NOT NULL,
+                        provider_identifier TEXT NOT NULL,
+                        last_updated DATETIME NOT NULL
+                    );''')
         
         cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_five_minute (
                         equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
@@ -271,12 +295,8 @@ class DataBase:
                     UNIQUE(issuer_id, type, period, fiscal_date)
                     )''')
 
-        
-
-
         # --- Prices Table ---   
-        
-        
+            
         # --- Check --- 
         res = cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
         print("Tables in database:")
