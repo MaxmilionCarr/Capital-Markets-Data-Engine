@@ -1,5 +1,0 @@
-Metadata-Version: 2.4
-Name: optionpricer
-Version: 0.1.0
-Summary: C++ pricers via pybind11
-Requires-Python: >=3.9
