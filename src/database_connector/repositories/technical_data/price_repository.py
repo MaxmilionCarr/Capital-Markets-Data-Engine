@@ -354,8 +354,11 @@ class EquityPricesRepository:
         start_date: datetime,
         end_date: datetime | None = None,
         *,
-        provider="IBKR",
+        provider: str | None = None,
     ) -> pd.DataFrame:
+        if provider is None:
+            provider = self.hub.data_hub.provider_identifiers["pricing"]
+
         if end_date is None:
             end_date = datetime.now()
 
@@ -371,7 +374,7 @@ class EquityPricesRepository:
         if existing.empty:
             print(f"No existing data for {equity.symbol} {period} from {start_date} to {end_date}, fetching...")
             try:
-                df = self.hub.market_data_service.fetch_equity_prices(
+                df = self.hub.pricing_data_service.fetch_equity_prices(
                     equity.symbol,
                     exchange_name,
                     start_date,
@@ -454,7 +457,7 @@ class EquityPricesRepository:
         for s, e in windows:
             print(f"Fetching missing window for {equity.symbol} {period} from {s} to {e}...")
             try:
-                df = self.hub.market_data_service.fetch_equity_prices(
+                df = self.hub.pricing_data_service.fetch_equity_prices(
                     equity.symbol,
                     exchange_name,
                     start_date=s,

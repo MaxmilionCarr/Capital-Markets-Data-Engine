@@ -201,11 +201,15 @@ class EquitiesRepository:
         eps: float | None = None,
         beta: float | None = None,
         market_cap: float | None = None,
+        provider_identifier: str | None = None,
     ) -> int:
+        if provider_identifier is None:
+            provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
+
         cur = self.connection.cursor()
         cur.execute(
-            "INSERT INTO equities (issuer_id, exchange_id, symbol, full_name, sector, industry, dividend_yield, pe_ratio, eps, beta, market_cap) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO equities (issuer_id, exchange_id, symbol, full_name, sector, industry, dividend_yield, pe_ratio, eps, beta, market_cap, provider_identifier) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 issuer_id,
                 exchange_id,
@@ -218,6 +222,7 @@ class EquitiesRepository:
                 eps,
                 beta,
                 market_cap,
+                provider_identifier,
             ),
         )
         self.connection.commit()
@@ -237,16 +242,20 @@ class EquitiesRepository:
         eps: float | None = None,
         beta: float | None = None,
         market_cap: float | None = None,
+        provider_identifier: str | None = None,
     ) -> int:
         """
         Upsert for the natural key (exchange_id, symbol).
         Requires SQLite 3.24+ (ON CONFLICT DO UPDATE).
         """
+        if provider_identifier is None:
+            provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
+
         cur = self.connection.cursor()
         cur.execute(
             """
-            INSERT INTO equities (issuer_id, exchange_id, symbol, full_name, sector, industry, dividend_yield, pe_ratio, eps, beta, market_cap)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO equities (issuer_id, exchange_id, symbol, full_name, sector, industry, dividend_yield, pe_ratio, eps, beta, market_cap, provider_identifier)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(exchange_id, symbol) DO UPDATE SET
                 issuer_id = excluded.issuer_id,
                 full_name = COALESCE(excluded.full_name, equities.full_name),
@@ -256,7 +265,8 @@ class EquitiesRepository:
                 pe_ratio = COALESCE(excluded.pe_ratio, equities.pe_ratio),
                 eps = COALESCE(excluded.eps, equities.eps),
                 beta = COALESCE(excluded.beta, equities.beta),
-                market_cap = COALESCE(excluded.market_cap, equities.market_cap)
+                market_cap = COALESCE(excluded.market_cap, equities.market_cap),
+                provider_identifier = excluded.provider_identifier
             """,
             (
                 issuer_id,
@@ -270,6 +280,7 @@ class EquitiesRepository:
                 eps,
                 beta,
                 market_cap,
+                provider_identifier,
             ),
         )
         self.connection.commit()
@@ -286,17 +297,14 @@ class EquitiesRepository:
     # NEED TO FIX THIS TODO
     def get_or_create_ensure(self, *, symbol: str, exchange_name: str) -> Equity | None:
         exchange_name = exchange_name.strip()
+        provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
 
         # check if exchange exists
         ex = self.hub.exchange_repo.get_info(exchange_name=exchange_name)
 
-        if ex:
-            existing = self.get_by_exchange_symbol(exchange_id=ex.exchange_id, symbol=symbol)
-            if existing:
-                return existing
-        else:
+        if not ex:
             # need issuer data to create exchange
-            issuer_enriched = self.hub.market_data_service.fetch_issuer_enriched(
+            issuer_enriched = self.hub.basic_info_service.fetch_issuer_enriched(
                 symbol=symbol,
                 exchange_name=exchange_name
             )
@@ -306,7 +314,8 @@ class EquitiesRepository:
                 timezone=issuer_enriched.timezone,
                 currency=issuer_enriched.currency,
                 rth_open=issuer_enriched.rth_open,
-                rth_close=issuer_enriched.rth_close
+                rth_close=issuer_enriched.rth_close,
+                provider_identifier=provider_identifier,
             )
 
             ex = self.hub.exchange_repo.get_info(exchange_id=ex_id)
@@ -315,7 +324,7 @@ class EquitiesRepository:
                 return None
 
         # fetch equity enrichment
-        equity = self.hub.market_data_service.fetch_equity_enriched(
+        equity = self.hub.basic_info_service.fetch_equity_enriched(
             symbol=symbol,
             exchange_name=exchange_name,
             currency=ex.currency
@@ -326,8 +335,15 @@ class EquitiesRepository:
 
         if issuer:
             issuer_id = issuer.issuer_id
+            self.hub.issuer_repo.upsert(
+                issuer_id,
+                full_name=equity.full_name,
+                cik=equity.cik,
+                lei=equity.lei,
+                provider_identifier=provider_identifier,
+            )
         else:
-            issuer_enriched = self.hub.market_data_service.fetch_issuer_enriched(
+            issuer_enriched = self.hub.basic_info_service.fetch_issuer_enriched(
                 symbol=symbol,
                 exchange_name=exchange_name
             )
@@ -336,10 +352,12 @@ class EquitiesRepository:
                 full_name=issuer_enriched.full_name,
                 cik=issuer_enriched.cik,
                 lei=issuer_enriched.lei,
+                provider_identifier=provider_identifier,
             )
 
-        # create equity
-        equity_id = self.create(
+        # upsert equity every ensure call so provider provenance always reflects
+        # the active market provider combination.
+        equity_id = self.upsert_by_exchange_symbol(
             issuer_id=issuer_id,
             exchange_id=ex.exchange_id,
             symbol=equity.symbol,
@@ -351,6 +369,7 @@ class EquitiesRepository:
             eps=equity.eps,
             beta=equity.beta,
             market_cap=equity.market_cap,
+            provider_identifier=provider_identifier,
         )
 
         return self.get_by_id(equity_id=equity_id)

@@ -99,16 +99,20 @@ class ExchangeRepository:
         *,
         rth_open: str = "09:30:00",
         rth_close: str = "16:00:00",
+        provider_identifier: str | None = None,
     ) -> int:
         """Insert a new exchange and return its ID."""
         if not exchange_name or not timezone:
             raise ValueError("exchange_name and timezone must be provided")
 
+        if provider_identifier is None:
+            provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
+
         cur = self.connection.cursor()
         try:
             cur.execute(
-                "INSERT INTO exchanges (exchange_name, timezone, currency, rth_open, rth_close) VALUES (?, ?, ?, ?, ?)",
-                (exchange_name, timezone, currency, rth_open, rth_close),
+                "INSERT INTO exchanges (exchange_name, timezone, currency, rth_open, rth_close, provider_identifier) VALUES (?, ?, ?, ?, ?, ?)",
+                (exchange_name, timezone, currency, rth_open, rth_close, provider_identifier),
             )
             self.connection.commit()
             return int(cur.lastrowid)
@@ -124,6 +128,7 @@ class ExchangeRepository:
         rth_open: str = "09:30:00",
         rth_close: str = "16:00:00",
         currency: str = "USD",
+        provider_identifier: str | None = None,
     ) -> int:
         """
         Return the ID of an existing exchange with this name,
@@ -135,6 +140,14 @@ class ExchangeRepository:
         try:
             info = self.get_info(exchange_name=exchange_name)
             if info is not None:
+                self.update(
+                    info.exchange_id,
+                    timezone=timezone,
+                    rth_open=rth_open,
+                    rth_close=rth_close,
+                    currency=currency,
+                    provider_identifier=provider_identifier,
+                )
                 return info.exchange_id
         except sql.Error:
             pass
@@ -142,7 +155,14 @@ class ExchangeRepository:
         if timezone is None:
             raise ValueError("timezone must be provided when creating a new exchange")
 
-        return self.create(exchange_name=exchange_name, timezone=timezone, currency=currency, rth_open=rth_open, rth_close=rth_close)
+        return self.create(
+            exchange_name=exchange_name,
+            timezone=timezone,
+            currency=currency,
+            rth_open=rth_open,
+            rth_close=rth_close,
+            provider_identifier=provider_identifier,
+        )
 
     # ---------- UPDATE ----------
 
@@ -155,12 +175,16 @@ class ExchangeRepository:
         rth_open: Optional[str] = None,
         rth_close: Optional[str] = None,
         currency: Optional[str] = None,
+        provider_identifier: Optional[str] = None,
     ) -> int:
         """
         Update fields for an exchange.
         Returns number of rows updated (0 if nothing matched).
         """
-        if exchange_name is None and timezone is None and rth_open is None and rth_close is None and currency is None:
+        if provider_identifier is None:
+            provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
+
+        if exchange_name is None and timezone is None and rth_open is None and rth_close is None and currency is None and provider_identifier is None:
             raise ValueError("Must provide at least one field to update")
 
         fields, values = [], []
@@ -179,6 +203,9 @@ class ExchangeRepository:
         if rth_close is not None:
             fields.append("rth_close = ?")
             values.append(rth_close)
+        if provider_identifier is not None:
+            fields.append("provider_identifier = ?")
+            values.append(provider_identifier)
 
         values.append(exchange_id)
         sql_query = f"UPDATE exchanges SET {', '.join(fields)} WHERE exchange_id = ?"

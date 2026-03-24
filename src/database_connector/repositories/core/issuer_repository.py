@@ -4,13 +4,16 @@ import sqlite3 as sql
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 
 import pandas as pd
 from typing_extensions import Literal
 
 from database_connector.db import Hub
 from database_connector.repositories.fundamental_data.statements_repository import Statement
+
+if TYPE_CHECKING:
+    from database_connector.repositories.securities.equities_repository import Equity
 
 STATEMENTS = Literal["income_statement", "balance_sheet", "cash_flow"]
 
@@ -56,7 +59,7 @@ class Issuer:
         )
     
     
-    def get_equities(self) -> List[Equity]:
+    def get_equities(self) -> List["Equity"]:
         """Return all equities (listings) associated with this issuer."""
         return self._hub.equities_repo.get_by_issuer(self.issuer_id)
 
@@ -135,11 +138,15 @@ class IssuerRepository:
         full_name: str | None = None,
         cik: str | None = None,
         lei: str | None = None,
+        provider_identifier: str | None = None,
     ) -> int:
+        if provider_identifier is None:
+            provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
+
         cur = self.connection.cursor()
         cur.execute(
-            "INSERT INTO issuers (full_name, cik, lei) VALUES (?, ?, ?)",
-            (full_name, cik, lei),
+            "INSERT INTO issuers (full_name, cik, lei, provider_identifier) VALUES (?, ?, ?, ?)",
+            (full_name, cik, lei, provider_identifier),
         )
         self.connection.commit()
         return int(cur.lastrowid)
@@ -150,15 +157,30 @@ class IssuerRepository:
         full_name: str | None = None,
         cik: str | None = None,
         lei: str | None = None,
+        provider_identifier: str | None = None,
     ) -> int:
         # Prefer deterministic identifiers
         if cik:
             existing = self.get_info(cik=cik)
             if existing:
+                self.upsert(
+                    existing.issuer_id,
+                    full_name=full_name,
+                    cik=cik,
+                    lei=lei,
+                    provider_identifier=provider_identifier,
+                )
                 return existing.issuer_id
         if lei:
             existing = self.get_info(lei=lei)
             if existing:
+                self.upsert(
+                    existing.issuer_id,
+                    full_name=full_name,
+                    cik=cik,
+                    lei=lei,
+                    provider_identifier=provider_identifier,
+                )
                 return existing.issuer_id
 
         # Fallback: name match (best-effort). Keep it conservative.
@@ -170,9 +192,21 @@ class IssuerRepository:
             )
             row = cur.fetchone()
             if row:
+                self.upsert(
+                    int(row[0]),
+                    full_name=full_name,
+                    cik=cik,
+                    lei=lei,
+                    provider_identifier=provider_identifier,
+                )
                 return int(row[0])
 
-        return self.create(full_name=full_name, cik=cik, lei=lei)
+        return self.create(
+            full_name=full_name,
+            cik=cik,
+            lei=lei,
+            provider_identifier=provider_identifier,
+        )
 
     def upsert(
         self,
@@ -181,8 +215,12 @@ class IssuerRepository:
         full_name: str | None = None,
         cik: str | None = None,
         lei: str | None = None,
+        provider_identifier: str | None = None,
     ) -> int:
-        if not (full_name or cik or lei):
+        if provider_identifier is None:
+            provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
+
+        if not (full_name or cik or lei or provider_identifier):
             return 0
 
         fields: list[str] = []
@@ -197,6 +235,9 @@ class IssuerRepository:
         if lei is not None:
             fields.append("lei = ?")
             values.append(lei)
+        if provider_identifier is not None:
+            fields.append("provider_identifier = ?")
+            values.append(provider_identifier)
 
         values.append(issuer_id)
 

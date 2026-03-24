@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3 as sql
 from typing import Any, List, Literal
 import os
+import json
 from dataclasses import dataclass, field
 
 from data_providers import FMPConfig, IBKRConfig, IBKRService, FMPService, DataHubConfig, DataHub
@@ -23,8 +24,10 @@ class Hub:
         self.config = config
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.data_hub = DataHub(config)
+        self._register_active_provenance()
         
         self._market_data_service = None
+        self._pricing_data_service = None
         self._fundamental_data_service = None
 
         self._exchange_repo = None
@@ -33,14 +36,70 @@ class Hub:
         self._equity_prices_repo = None
         
         self._statements_repo = None
+
+    def _register_active_provenance(self) -> None:
+        """
+        Best-effort registration of active provider hashes.
+        This is safe on existing databases that do not yet have the provenance table.
+        """
+        cur = self.conn.cursor()
+        try:
+            cur.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_provenance'"
+            )
+            if cur.fetchone() is None:
+                return
+
+            manifest = self.data_hub.provider_manifest
+            identifiers = self.data_hub.provider_identifiers
+
+            rows = [
+                (identifiers["basic_info"], "basic_info", json.dumps(manifest["basic_info"])),
+                (identifiers["pricing"], "pricing", json.dumps(manifest["pricing"])),
+                (identifiers["fundamental"], "fundamental", json.dumps(manifest["fundamental"])),
+                (
+                    identifiers["all"],
+                    "all",
+                    json.dumps(
+                        manifest["basic_info"]
+                        + manifest["pricing"]
+                        + manifest["fundamental"]
+                    ),
+                ),
+            ]
+
+            cur.executemany(
+                """
+                INSERT INTO provider_provenance (provider_identifier, scope, providers)
+                VALUES (?, ?, ?)
+                ON CONFLICT(provider_identifier) DO NOTHING
+                """,
+                rows,
+            )
+            self.conn.commit()
+        except sql.Error:
+            # Do not block Hub construction due to provenance registration failures.
+            pass
     
     @property
     def market_data_service(self):
         if self._market_data_service is None:
 
-            self._market_data_service = self.data_hub.market
+            self._market_data_service = self.data_hub.basic_info
 
         return self._market_data_service
+
+    @property
+    def basic_info_service(self):
+        return self.market_data_service
+
+    @property
+    def pricing_data_service(self):
+        if self._pricing_data_service is None:
+
+            self._pricing_data_service = self.data_hub.pricing
+
+        return self._pricing_data_service
     
     @property
     def fundamental_data_service(self):
@@ -153,6 +212,13 @@ class DataBase:
         con = self.connection
         cur = con.cursor()
 
+
+        cur.execute('''CREATE TABLE IF NOT EXISTS provider_provenance (
+                        provider_identifier TEXT PRIMARY KEY,
+                        scope TEXT NOT NULL,
+                        providers TEXT NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );''')
 
         # --- Core Reference Tables ---
         cur.execute('''CREATE TABLE IF NOT EXISTS exchanges (
@@ -291,8 +357,9 @@ class DataBase:
                     type TEXT NOT NULL,  -- 'income_statement', 'balance_sheet', 'cash_flow'
                     period TEXT NOT NULL,  -- 'annual' or 'quarterly'
                     fiscal_date DATETIME NOT NULL,
+                    provider_identifier TEXT NOT NULL,
                     statement JSON NOT NULL,
-                    UNIQUE(issuer_id, type, period, fiscal_date)
+                    UNIQUE(issuer_id, type, period, fiscal_date, provider_identifier)
                     )''')
 
         # --- Prices Table ---   

@@ -25,6 +25,7 @@ class Statement:
     type: str
     period: str
     fiscal_date: str
+    provider_identifier: str
     statement: dict[str, Any]
     _hub: Hub
 
@@ -59,20 +60,24 @@ class StatementRepository:
         statement_type: STATEMENT_TYPES,
         period: PERIODS,
         count: int = 1,
+        provider_identifier: str | None = None,
     ) -> List[Statement]:
         """
         Returns the most recent `count` statements (newest -> oldest).
         """
+        if provider_identifier is None:
+            provider_identifier = self.hub.data_hub.provider_identifiers["fundamental"]
+
         cur = self.connection.cursor()
         cur.execute(
             """
-            SELECT id, issuer_id, type, period, fiscal_date, statement
+            SELECT id, issuer_id, type, period, fiscal_date, provider_identifier, statement
             FROM statements
-            WHERE issuer_id = ? AND type = ? AND period = ?
+            WHERE issuer_id = ? AND type = ? AND period = ? AND provider_identifier = ?
             ORDER BY fiscal_date DESC
             LIMIT ?
             """,
-            (issuer_id, statement_type, period, count),
+            (issuer_id, statement_type, period, provider_identifier, count),
         )
         rows = cur.fetchall()
 
@@ -83,7 +88,8 @@ class StatementRepository:
                 type=r[2],
                 period=r[3],
                 fiscal_date=r[4],
-                statement=json.loads(r[5]) if r[5] else {},
+                provider_identifier=r[5],
+                statement=json.loads(r[6]) if r[6] else {},
                 _hub=self.hub,
             )
             for r in rows
@@ -100,19 +106,30 @@ class StatementRepository:
         period: PERIODS,
         fiscal_date: str,
         statement: dict[str, Any],
+        provider_identifier: str | None = None,
     ) -> None:
         """
         Insert or override statement.
         """
+        if provider_identifier is None:
+            provider_identifier = self.hub.data_hub.provider_identifiers["fundamental"]
+
         cur = self.connection.cursor()
         cur.execute(
             """
-            INSERT INTO statements (issuer_id, type, period, fiscal_date, statement)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(issuer_id, type, period, fiscal_date)
+            INSERT INTO statements (issuer_id, type, period, fiscal_date, provider_identifier, statement)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(issuer_id, type, period, fiscal_date, provider_identifier)
             DO UPDATE SET statement = excluded.statement
             """,
-            (issuer_id, statement_type, period, fiscal_date, json.dumps(statement)),
+            (
+                issuer_id,
+                statement_type,
+                period,
+                fiscal_date,
+                provider_identifier,
+                json.dumps(statement),
+            ),
         )
         self.connection.commit()
 
@@ -126,14 +143,24 @@ class StatementRepository:
         statement_type: STATEMENT_TYPES,
         period: PERIODS,
         count: int,
+        provider_identifier: str | None = None,
     ) -> List[Statement]:
         """
         Ensures the most recent `count` statements exist in DB.
         Missing ones are fetched and upserted (override allowed).
         """
 
+        if provider_identifier is None:
+            provider_identifier = self.hub.data_hub.provider_identifiers["fundamental"]
+
         # 1) Get what we already have
-        existing = self.get_statements(issuer_id, statement_type, period, count)
+        existing = self.get_statements(
+            issuer_id,
+            statement_type,
+            period,
+            count,
+            provider_identifier=provider_identifier,
+        )
         existing_dates = {s.fiscal_date for s in existing}
 
         # If we already have enough, return them
@@ -171,10 +198,17 @@ class StatementRepository:
                 period,
                 fiscal_date,
                 st,
+                provider_identifier=provider_identifier,
             )
 
         # 4) Return newest N from DB
-        return self.get_statements(issuer_id, statement_type, period, count)
+        return self.get_statements(
+            issuer_id,
+            statement_type,
+            period,
+            count,
+            provider_identifier=provider_identifier,
+        )
 
     # ============================================================
     # DELETE
