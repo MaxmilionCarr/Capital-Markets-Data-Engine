@@ -40,7 +40,6 @@ multitasking==0.0.12
 mypy_extensions==1.1.0
 nest-asyncio==1.6.0
 numpy==2.3.2
--e git+https://github.com/MaxmilionCarr/MarketResearch.git@857309e8e1ceabebca36da0cc77974fc18b8486a#egg=optionpricer
 packaging==25.0
 pandas==2.3.2
 peewee==3.18.2

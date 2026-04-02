@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
 import sqlite3 as sql
 from typing import Any, Literal, List
 
 from database_connector.db import Hub
+
+logger = logging.getLogger(__name__)
 
 
 # Statement "type" (what kind of statement)
@@ -48,7 +51,6 @@ class StatementRepository:
     def __init__(self, connection: sql.Connection, hub: Hub):
         self.connection = connection
         self.hub = hub
-        self.connection.execute("PRAGMA foreign_keys = ON")
 
     # ============================================================
     # READ
@@ -114,14 +116,15 @@ class StatementRepository:
         if provider_identifier is None:
             provider_identifier = self.hub.data_hub.provider_identifiers["fundamental"]
 
-        cur = self.connection.cursor()
-        cur.execute(
-            """
-            INSERT INTO statements (issuer_id, type, period, fiscal_date, provider_identifier, statement)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(issuer_id, type, period, fiscal_date, provider_identifier)
-            DO UPDATE SET statement = excluded.statement
-            """,
+        upsert_sql = self.hub.db_service.build_upsert(
+            table="statements",
+            columns=("issuer_id", "type", "period", "fiscal_date", "provider_identifier", "statement"),
+            conflict_columns=("issuer_id", "type", "period", "fiscal_date", "provider_identifier"),
+            update_columns=("statement",),
+        )
+
+        self.hub.db_service.execute(
+            upsert_sql,
             (
                 issuer_id,
                 statement_type,
@@ -131,7 +134,7 @@ class StatementRepository:
                 json.dumps(statement),
             ),
         )
-        self.connection.commit()
+        self.hub.db_service.commit()
 
     # ============================================================
     # ENSURE LOGIC
@@ -161,13 +164,13 @@ class StatementRepository:
             count,
             provider_identifier=provider_identifier,
         )
-        existing_dates = {s.fiscal_date for s in existing}
+        fetched: list[dict[str, Any]] = []
 
         # If we already have enough, return them
         if len(existing) >= count:
             return existing
 
-        print("Refetch requested")
+        logger.debug("Refetch requested for issuer_id=%s statement_type=%s period=%s", issuer_id, statement_type, period)
         # 2) Fetch from service
         issuer = self.hub.issuer_repo.get_info(issuer_id=issuer_id)
         equities = issuer.get_equities()
@@ -184,7 +187,13 @@ class StatementRepository:
                 ) or []
                 break  # stop after first successful fetch
             except Exception as e:
-                print(f"Error fetching {statement_type} for {symbol} on {exchange_name}: {e}")
+                logger.warning(
+                    "Failed fetching %s for %s on %s: %s",
+                    statement_type,
+                    symbol,
+                    exchange_name,
+                    e,
+                )
                 continue
 
         # 3) Upsert everything fetched (override safe)

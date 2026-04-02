@@ -1,32 +1,47 @@
-# TODO: need a better name for this top level access. This is where users will get all their data from
 from __future__ import annotations
-import sqlite3 as sql
-from typing import Any, List, Literal
-import os
+
 import json
+import logging
+import os
+import sqlite3 as sql
+import importlib
 from dataclasses import dataclass, field
+from typing import List
 
-from data_providers import FMPConfig, IBKRConfig, IBKRService, FMPService, DataHubConfig, DataHub
+from data_providers import DataHub, DataHubConfig
+from database_connector.dialects import SQLiteDialect
+from database_connector.services import DatabaseService, SchemaService
+
+logger = logging.getLogger(__name__)
 
 try:
-    from dotenv import load_dotenv
-except ImportError:
-    raise ImportError("Please install python-dotenv to manage environment variables.")
-try:
-    load_dotenv()  # Load environment variables from a .env file
-    env_path = os.getenv("DATABASE_PATH")
-except Exception as e:
-    print("Not using environment variables, please configure your .env file.")
-        
+    dotenv_module = importlib.import_module("dotenv")
+    load_dotenv = getattr(dotenv_module, "load_dotenv", None)
+    if callable(load_dotenv):
+        load_dotenv()
+except Exception:
+    logger.debug("python-dotenv is unavailable; relying on process environment variables only.")
+
+env_path = os.getenv("DATABASE_PATH")
+
+
+def _resolve_sqlite_dialect(dialect: str) -> SQLiteDialect:
+    normalized = dialect.strip().lower()
+    if normalized != "sqlite":
+        raise ValueError(f"Unsupported dialect '{dialect}'. Supported: sqlite")
+    return SQLiteDialect()
+
+
 class Hub:
-    def __init__(self, connection: sql.Connection, config: DataHubConfig):
-        self.conn = connection
+    def __init__(self, database_service: DatabaseService, config: DataHubConfig):
+        self.db_service = database_service
+        self.conn = database_service.connection
         self.config = config
-        self.conn.execute("PRAGMA foreign_keys = ON")
         self.data_hub = DataHub(config)
         self._register_active_provenance()
-        
+
         self._market_data_service = None
+        self._exchange_service = None
         self._pricing_data_service = None
         self._fundamental_data_service = None
 
@@ -34,7 +49,7 @@ class Hub:
         self._issuer_repo = None
         self._equities_repo = None
         self._equity_prices_repo = None
-        
+
         self._statements_repo = None
 
     def _register_active_provenance(self) -> None:
@@ -42,44 +57,35 @@ class Hub:
         Best-effort registration of active provider hashes.
         This is safe on existing databases that do not yet have the provenance table.
         """
-        cur = self.conn.cursor()
-        try:
-            cur.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_provenance'"
-            )
-            if cur.fetchone() is None:
-                return
+        if not self.db_service.table_exists("provider_provenance"):
+            return
 
+        try:
             manifest = self.data_hub.provider_manifest
             identifiers = self.data_hub.provider_identifiers
 
-            rows = [
+            rows = (
                 (identifiers["basic_info"], "basic_info", json.dumps(manifest["basic_info"])),
                 (identifiers["pricing"], "pricing", json.dumps(manifest["pricing"])),
                 (identifiers["fundamental"], "fundamental", json.dumps(manifest["fundamental"])),
                 (
                     identifiers["all"],
                     "all",
-                    json.dumps(
-                        manifest["basic_info"]
-                        + manifest["pricing"]
-                        + manifest["fundamental"]
-                    ),
+                    json.dumps(manifest["basic_info"] + manifest["pricing"] + manifest["fundamental"]),
                 ),
-            ]
-
-            cur.executemany(
-                """
-                INSERT INTO provider_provenance (provider_identifier, scope, providers)
-                VALUES (?, ?, ?)
-                ON CONFLICT(provider_identifier) DO NOTHING
-                """,
-                rows,
             )
-            self.conn.commit()
+
+            upsert_sql = self.db_service.build_upsert(
+                table="provider_provenance",
+                columns=("provider_identifier", "scope", "providers"),
+                conflict_columns=("provider_identifier",),
+                update_columns=("scope", "providers"),
+            )
+
+            self.db_service.executemany(upsert_sql, rows)
+            self.db_service.commit()
         except sql.Error:
-            # Do not block Hub construction due to provenance registration failures.
-            pass
+            logger.exception("Failed to register active provider provenance.")
     
     @property
     def market_data_service(self):
@@ -92,6 +98,12 @@ class Hub:
     @property
     def basic_info_service(self):
         return self.market_data_service
+
+    @property
+    def exchange_service(self):
+        if self._exchange_service is None:
+            self._exchange_service = self.data_hub.exchange
+        return self._exchange_service
 
     @property
     def pricing_data_service(self):
@@ -146,21 +158,25 @@ class Hub:
 
 @dataclass
 class DB:
-    db_path: str = env_path
+    db_path: str | None = env_path
     config: DataHubConfig = field(default_factory=DataHubConfig)
+    dialect: str = "sqlite"
 
     _connection: sql.Connection = field(init=False)
+    _database_service: DatabaseService = field(init=False)
     _hub: Hub = field(init=False)
 
     def __post_init__(self):
+        if not self.db_path:
+            raise ValueError("db_path must be provided explicitly or via DATABASE_PATH")
+
         self._connection = sql.connect(self.db_path)
-        self._connection.execute("PRAGMA foreign_keys = ON")
-        self._connection.execute("PRAGMA journal_mode = WAL")
-        self._hub = Hub(self._connection, self.config)
+        self._database_service = DatabaseService(self._connection, _resolve_sqlite_dialect(self.dialect))
+        self._hub = Hub(self._database_service, self.config)
 
     def close(self):
         try:
-            self._connection.close()
+            self._database_service.close()
         except Exception:
             pass
     
@@ -194,205 +210,33 @@ class DB:
         return self._hub.equities_repo.get_or_create_ensure(symbol=symbol, exchange_name=exchange_name)
 
 class DataBase:
-    def __init__(self, db_path=env_path):
+    def __init__(self, db_path=env_path, dialect: str = "sqlite"):
+        if not db_path:
+            raise ValueError("db_path must be provided explicitly or via DATABASE_PATH")
+
         self.path = db_path
         self.connection = sql.connect(db_path)
-        self.connection.execute("PRAGMA foreign_keys = ON")
+        self.database_service = DatabaseService(self.connection, _resolve_sqlite_dialect(dialect))
+        self.schema_service = SchemaService(self.database_service)
 
     def close(self):
-        self.connection.close()
+        self.database_service.close()
 
     def get_custom(self, query, params=()):
-        cur = self.connection.cursor()
-        cur.execute(query, params)
-        return cur.fetchall()
+        return self.database_service.fetchall(query, params)
     
-    def create_db(self):
-        
-        con = self.connection
-        cur = con.cursor()
-
-
-        cur.execute('''CREATE TABLE IF NOT EXISTS provider_provenance (
-                        provider_identifier TEXT PRIMARY KEY,
-                        scope TEXT NOT NULL,
-                        providers TEXT NOT NULL,
-                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    );''')
-
-        # --- Core Reference Tables ---
-        cur.execute('''CREATE TABLE IF NOT EXISTS exchanges (
-                        exchange_id INTEGER PRIMARY KEY,
-                        exchange_name TEXT NOT NULL UNIQUE,
-                        timezone TEXT NOT NULL,
-                        currency TEXT NOT NULL,
-                        rth_open TEXT NOT NULL,
-                        rth_close TEXT NOT NULL,
-                        provider_identifier TEXT NOT NULL
-                    );
-                    ''')
-        cur.execute('''CREATE INDEX IF NOT EXISTS idx_exchanges_name ON exchanges (exchange_name)''')
-        
-        # --- Issuer Tables ---
-        
-        # Change this so that tickers doesn't need exchange, equities instead should
-        cur.execute('''CREATE TABLE IF NOT EXISTS issuers (
-                        issuer_id INTEGER PRIMARY KEY,
-                        full_name TEXT,
-                        cik TEXT UNIQUE,
-                        lei TEXT UNIQUE,
-                        provider_identifier TEXT NOT NULL
-                    );
-                    ''')
-        
-        cur.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_issuers_cik ON issuers(cik);
-                    '''
-                    )
-        cur.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_issuers_lei ON issuers(lei);   
-                    
-                    ''')
-        
-        # --- Security Type ---
-        
-        # -- Equity Table --
-        cur.execute('''CREATE TABLE IF NOT EXISTS equities (
-                        equity_id INTEGER PRIMARY KEY,
-                        issuer_id INTEGER NOT NULL,
-                        exchange_id INTEGER NOT NULL,
-
-                        symbol TEXT NOT NULL,
-                        full_name TEXT,
-                        sector TEXT,
-                        industry TEXT,
-                        dividend_yield REAL,
-                        pe_ratio REAL,
-                        eps REAL,
-                        beta REAL,
-                        market_cap REAL,
-                        provider_identifier TEXT NOT NULL,
-
-                        FOREIGN KEY (issuer_id) REFERENCES issuers(issuer_id) ON DELETE CASCADE,
-                        FOREIGN KEY (exchange_id) REFERENCES exchanges(exchange_id) ON DELETE CASCADE
-                    );''')
-        
-        cur.execute('''CREATE UNIQUE INDEX IF NOT EXISTS uq_equities_exchange_symbol
-                        ON equities(exchange_id, symbol);
-                    ''')
-        
-        cur.execute('''CREATE TABLE IF NOT EXISTS equity_intraday_coverage (
-                        equity_id INTEGER NOT NULL,
-                        date      DATE NOT NULL,
-                        period    TEXT NOT NULL,          -- '1 hour', '5 mins'
-                        status    TEXT NOT NULL,          -- ok | closed | partial | missing | error
-                        provider  TEXT NOT NULL,
-                        rows      INTEGER NOT NULL,
-                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (equity_id, date, period, provider)
-                    );''')
-        
-        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_daily_provider (
-                        equity_id INTEGER NOT NULL,
-                        provider_identifier TEXT NOT NULL,
-                        last_updated DATETIME NOT NULL
-                    );''')
-
-        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_daily (
-                        equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
-                        datetime DATETIME NOT NULL,
-                        open REAL,
-                        high REAL,
-                        low REAL,
-                        close REAL NOT NULL,
-                        volume INTEGER,
-                        PRIMARY KEY (equity_id, datetime)
-                    )''')
-
-        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_hourly_provider (
-                        equity_id INTEGER NOT NULL,
-                        provider_identifier TEXT NOT NULL,
-                        last_updated DATETIME NOT NULL
-                    );''')
-        
-        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_hourly (
-                        equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
-                        datetime DATETIME NOT NULL,
-                        open REAL,
-                        high REAL,
-                        low REAL,
-                        close REAL NOT NULL,
-                        volume INTEGER,
-                        PRIMARY KEY (equity_id, datetime)
-                    )''')
-        
-        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_five_minute_provider (
-                        equity_id INTEGER NOT NULL,
-                        provider_identifier TEXT NOT NULL,
-                        last_updated DATETIME NOT NULL
-                    );''')
-        
-        cur.execute('''CREATE TABLE IF NOT EXISTS equity_prices_five_minute (
-                        equity_id INTEGER NOT NULL REFERENCES equities(equity_id) ON DELETE CASCADE,
-                        datetime DATETIME NOT NULL,
-                        open REAL,
-                        high REAL,
-                        low REAL,
-                        close REAL NOT NULL,
-                        volume INTEGER,
-                        PRIMARY KEY (equity_id, datetime)
-                    )''')
-        
-        cur.execute('''CREATE INDEX IF NOT EXISTS idx_prices_equity_time_daily ON equity_prices_daily (equity_id, datetime)''')
-        cur.execute('''CREATE INDEX IF NOT EXISTS idx_prices_equity_time_hourly ON equity_prices_hourly (equity_id, datetime)''')
-        cur.execute('''CREATE INDEX IF NOT EXISTS idx_prices_equity_time_five_minute ON equity_prices_five_minute (equity_id, datetime)''')
-        
-        # TODO: 
-        
-        # -- Statement Tables --
-
-        cur.execute('''CREATE TABLE IF NOT EXISTS statements (
-                    id INTEGER PRIMARY KEY,
-                    issuer_id INTEGER NOT NULL REFERENCES issuers(issuer_id) ON DELETE CASCADE,
-                    type TEXT NOT NULL,  -- 'income_statement', 'balance_sheet', 'cash_flow'
-                    period TEXT NOT NULL,  -- 'annual' or 'quarterly'
-                    fiscal_date DATETIME NOT NULL,
-                    provider_identifier TEXT NOT NULL,
-                    statement JSON NOT NULL,
-                    UNIQUE(issuer_id, type, period, fiscal_date, provider_identifier)
-                    )''')
-
-        # --- Prices Table ---   
-            
-        # --- Check --- 
-        res = cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        print("Tables in database:")
-        for row in res:
-            print(row[0])
-        con.commit()
-        con.close()
-        print("Database created successfully.")
+    def create_db(self, *, keep_open: bool = False):
+        self.schema_service.create_schema()
+        if not keep_open:
+            self.close()
     
     def delete_db(self):
-        self.connection.close()
+        self.close()
         if input("Are you sure you want to delete the database? This action cannot be undone. (y/n): ").lower() == 'y':
             os.remove(self.path)
-            print("Database file removed.")
+            logger.info("Database file removed.")
         else:
-            print("Database deletion cancelled.")
+            logger.info("Database deletion cancelled.")
     
     def close_db(self):
-        self.connection.close()
-
-    # TODO: Figure out a persistent schema migration
-    '''
-    def update_schema(self, table, updated_schema):
-        con = self.connection
-        cur = con.cursor()
-        # Drop the existing table
-        cur.execute(f"DROP TABLE IF EXISTS {table}")
-        # Create the new table with the updated schema
-        cur.execute(updated_schema)
-        con.commit()
-        con.close()
-    '''
+        self.close()

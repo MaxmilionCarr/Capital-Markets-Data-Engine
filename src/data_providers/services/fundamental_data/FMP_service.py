@@ -1,9 +1,9 @@
 from typing import List, Literal
 from data_providers.clients import FMPConfig, FMPProvider
-from data_providers.clients.base import IssuerInfo, EquityInfo
+from data_providers.clients.base import IssuerInfo, ExchangeInfo, EquityInfo
 from data_providers.exceptions import NotSupported, ProviderError, DataNotFound
 import pandas as pd
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 
 class FMPService:
     name = "FMP"
@@ -12,15 +12,80 @@ class FMPService:
     
     def __init__(self, config: FMPConfig):
         self._client = FMPProvider(config)
+        self._equity_snapshot_cache: dict[tuple[str, str | None, str | None], tuple[datetime, EquityInfo]] = {}
+        self._equity_snapshot_ttl = timedelta(minutes=5)
+
+    def _snapshot_cache_key(self, symbol: str, exchange_name: str | None, currency: str | None) -> tuple[str, str | None, str | None]:
+        return (
+            symbol.upper().strip(),
+            exchange_name.upper().strip() if exchange_name else None,
+            currency.upper().strip() if currency else None,
+        )
+
+    def _get_cached_snapshot(self, key: tuple[str, str | None, str | None]) -> EquityInfo | None:
+        cached = self._equity_snapshot_cache.get(key)
+        if cached is None:
+            return None
+
+        cached_at, snapshot = cached
+        if datetime.now(timezone.utc) - cached_at > self._equity_snapshot_ttl:
+            self._equity_snapshot_cache.pop(key, None)
+            return None
+
+        return snapshot
 
     def fetch_issuer(self, symbol: str, exchange_name: str | None = None, currency: str | None = None) -> IssuerInfo:
         return self._client.get_issuer_information(symbol, exchange_name)
 
+    def fetch_exchange(self, symbol: str, exchange_name: str) -> ExchangeInfo:
+        """FMP does not provide exchange information."""
+        raise NotSupported("FMP does not provide exchange information")
+
     def fetch_equity(self, symbol: str, exchange_name: str | None = None, currency: str | None = None) -> EquityInfo:
-        return self._client.get_equity_information(symbol, exchange_name)
+        return self.fetch_equity_snapshot(symbol, exchange_name, currency)
+
+    def fetch_equity_snapshot(
+        self,
+        symbol: str,
+        exchange_name: str | None = None,
+        currency: str | None = None,
+        *,
+        refresh: bool = False,
+    ) -> EquityInfo:
+        cache_key = self._snapshot_cache_key(symbol, exchange_name, currency)
+        if not refresh:
+            cached_snapshot = self._get_cached_snapshot(cache_key)
+            if cached_snapshot is not None:
+                return cached_snapshot
+
+        snapshot = self._client.get_equity_snapshot(symbol, exchange_name)
+        self._equity_snapshot_cache[cache_key] = (datetime.now(timezone.utc), snapshot)
+        return snapshot
     
-    def fetch_equity_prices(self, symbol: str, exchange_name: str | None = None, currency: str | None = None, start_date: datetime | None = None, end_date: datetime | None = None) -> pd.DataFrame:
-        raise(NotSupported)
+    def fetch_equity_prices(
+        self,
+        symbol: str,
+        exchange_name: str | None = None,
+        currency: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        bar_size: str = "1 day",
+        *,
+        rth_open=None,
+        rth_close=None,
+    ) -> pd.DataFrame:
+        if start_date is None:
+            raise ValueError("start_date is required")
+
+        return self._client.get_equity_prices(
+            symbol,
+            exchange_name,
+            start_date,
+            end_date,
+            bar_size,
+            rth_open=rth_open,
+            rth_close=rth_close,
+        )
 
     # Service Functions
     def fetch_income_statement(self, symbol: str, prev_years: int, period: str) -> pd.DataFrame:

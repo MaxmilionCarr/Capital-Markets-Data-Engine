@@ -7,7 +7,7 @@ import pandas as pd
 from datetime import datetime, time
 
 from data_providers.clients import IBKRConfig, IBKRProvider
-from data_providers.clients.base import IssuerInfo, EquityInfo
+from data_providers.clients.base import IssuerInfo, ExchangeInfo, EquityInfo
 
 
 class IBKRService:
@@ -77,6 +77,10 @@ class IBKRService:
     def fetch_issuer(self, symbol: str, exchange_name: str = None) -> IssuerInfo | List[IssuerInfo]:
         self._ensure_connected()
         return self._client.get_issuer_information(symbol, exchange_name)
+
+    def fetch_exchange(self, symbol: str, exchange_name: str) -> ExchangeInfo:
+        self._ensure_connected()
+        return self._client.get_exchange_information(symbol, exchange_name)
 
     def fetch_equity(self, symbol: str, exchange_name: str = None, currency: str = None) -> EquityInfo:
         self._ensure_connected()

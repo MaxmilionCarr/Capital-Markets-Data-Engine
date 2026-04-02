@@ -165,10 +165,12 @@ def _assert_scoped_hash_config() -> None:
 def _assert_db_provenance_end_to_end() -> None:
 	fd, temp_path = tempfile.mkstemp(prefix="provider_hash_test_", suffix=".db")
 	os.close(fd)
+	db = None
 
 	try:
 		creator = DataBase(temp_path)
 		creator.create_db()
+		creator.close()
 
 		cfg = DataHubConfig(
 			basic_info_services=(MockBasicFMP(), MockBasicIBKR()),
@@ -244,17 +246,21 @@ def _assert_db_provenance_end_to_end() -> None:
 
 		# Provider provenance table should contain scoped hashes.
 		cur.execute("SELECT scope, provider_identifier FROM provider_provenance")
+		rows = cur.fetchall()
 		print("Provider Provenance Table:")
-		for scope, provider_identifier in cur.fetchall():
+		for scope, provider_identifier in rows:
 			print(f"  {scope}: {provider_identifier}")
-		scopes = {scope: provider_identifier for scope, provider_identifier in cur.fetchall()}
+		scopes = {scope: provider_identifier for scope, provider_identifier in rows}
 		assert scopes["basic_info"] == basic_hash
 		assert scopes["pricing"] == pricing_hash
 		assert scopes["fundamental"] == fundamental_hash
 	
 		db.close()
+		db = None
 
 	finally:
+		if db is not None:
+			db.close()
 		if os.path.exists(temp_path):
 			os.remove(temp_path)
 

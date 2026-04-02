@@ -80,7 +80,6 @@ class IssuerRepository:
     def __init__(self, connection: sql.Connection, hub: Hub):
         self.connection = connection
         self.hub = hub
-        self.connection.execute("PRAGMA foreign_keys = ON")
 
     # ---------- READ ----------
 

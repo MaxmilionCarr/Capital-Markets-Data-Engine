@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import sqlite3 as sql
 from datetime import datetime, timedelta, time, date
+import logging
 from typing import Literal
 
 import pandas as pd
 
 from database_connector.db import Hub
 from database_connector.repositories.securities.equities_repository import Equity
+
+logger = logging.getLogger(__name__)
 
 
 # -------------------------------------------------
@@ -77,6 +80,14 @@ def _exchange_name_from_equity(equity: Equity) -> str:
     return getattr(ex, "name", None) or getattr(ex, "exchange_name", None) or "SMART"
 
 
+def _sql_value(value):
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
 # -------------------------------------------------
 # Repository
 # -------------------------------------------------
@@ -90,7 +101,6 @@ class EquityPricesRepository:
     def __init__(self, connection: sql.Connection, hub: Hub):
         self.connection = connection
         self.hub = hub
-        self.connection.execute("PRAGMA foreign_keys = ON")
 
     # =================================================
     # READ
@@ -98,6 +108,8 @@ class EquityPricesRepository:
 
     def _fetch_daily(self, equity: Equity, start, end):
         cur = self.connection.cursor()
+        start = _sql_value(start)
+        end = _sql_value(end) if end else None
 
         if end:
             cur.execute(
@@ -129,6 +141,8 @@ class EquityPricesRepository:
     def _fetch_intraday_raw(self, equity: Equity, period, start, end):
         table = "equity_prices_hourly" if period == "1 hour" else "equity_prices_five_minute"
         cur = self.connection.cursor()
+        start = _sql_value(start)
+        end = _sql_value(end) if end else None
 
         if end:
             cur.execute(
@@ -248,7 +262,7 @@ class EquityPricesRepository:
                         rows = excluded.rows,
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    (equity.equity_id, cur_day, period, status, provider, rows),
+                    (equity.equity_id, _sql_value(cur_day), period, status, provider, rows),
                 )
 
             cur_day += timedelta(days=1)
@@ -285,7 +299,7 @@ class EquityPricesRepository:
                         rows = excluded.rows,
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    (equity.equity_id, cur_day, period, status, provider, rows),
+                    (equity.equity_id, _sql_value(cur_day), period, status, provider, rows),
                 )
 
             cur_day += timedelta(days=1)
@@ -315,7 +329,7 @@ class EquityPricesRepository:
         rows = [
             (
                 equity.equity_id,
-                r.datetime.to_pydatetime(),
+                _sql_value(r.datetime.to_pydatetime()),
                 r.open,
                 r.high,
                 r.low,
@@ -325,21 +339,13 @@ class EquityPricesRepository:
             for r in df.itertuples(index=False)
         ]
 
-        cur = self.connection.cursor()
-        cur.execute("BEGIN")
-        try:
-            cur.executemany(
-                f"""
-                INSERT OR IGNORE INTO {table}
-                (equity_id, datetime, open, high, low, close, volume)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
-            self.connection.commit()
-        except Exception:
-            self.connection.rollback()
-            raise
+        insert_sql = self.hub.db_service.build_insert_ignore(
+            table=table,
+            columns=("equity_id", "datetime", "open", "high", "low", "close", "volume"),
+        )
+
+        with self.hub.db_service.transaction():
+            self.hub.db_service.executemany(insert_sql, rows)
 
     # =================================================
     # ENSURE
@@ -372,7 +378,13 @@ class EquityPricesRepository:
 
         # -------- First fill --------
         if existing.empty:
-            print(f"No existing data for {equity.symbol} {period} from {start_date} to {end_date}, fetching...")
+            logger.info(
+                "No existing %s data for %s between %s and %s; fetching.",
+                period,
+                equity.symbol,
+                start_date,
+                end_date,
+            )
             try:
                 df = self.hub.pricing_data_service.fetch_equity_prices(
                     equity.symbol,
@@ -384,7 +396,13 @@ class EquityPricesRepository:
                     rth_close=rth_close,
                 )
             except Exception as e:
-                print(f"Error fetching prices for {equity.symbol} from {start_date} to {end_date}: {e}")
+                logger.warning(
+                    "Error fetching prices for %s from %s to %s: %s",
+                    equity.symbol,
+                    start_date,
+                    end_date,
+                    e,
+                )
                 self.update_intraday_coverage_failed(
                     equity=equity,
                     period=period,
@@ -455,7 +473,7 @@ class EquityPricesRepository:
 
         # -------- Fetch those bigger windows --------
         for s, e in windows:
-            print(f"Fetching missing window for {equity.symbol} {period} from {s} to {e}...")
+            logger.info("Fetching missing window for %s %s from %s to %s", equity.symbol, period, s, e)
             try:
                 df = self.hub.pricing_data_service.fetch_equity_prices(
                     equity.symbol,
@@ -467,7 +485,7 @@ class EquityPricesRepository:
                     rth_close=rth_close,
                 )
             except Exception as err:
-                print(f"Error fetching prices for {equity.symbol} from {s} to {e}: {err}")
+                logger.warning("Error fetching prices for %s from %s to %s: %s", equity.symbol, s, e, err)
                 self.update_intraday_coverage_failed(
                     equity=equity,
                     period=period,

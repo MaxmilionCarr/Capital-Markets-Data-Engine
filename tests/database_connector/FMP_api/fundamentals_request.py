@@ -10,12 +10,12 @@ db_path = os.getenv("TESTING_DATABASE_PATH")
 def test_fundamentals():
     db = DB(db_path=db_path)
 
-    ticker = db.get_ticker("AAPL", "NASDAQ", ensure=True)
-    print("Ticker info:")
-    print(ticker)
+    equity = db.get_equity("AAPL", "NASDAQ", ensure=True)
+    print("Equity info:")
+    print(equity)
 
     # Test fetching fundamental functionality
-    income_statement = ticker.get_statements("income_statement", period="annual", look_back=4, ensure=True)
+    income_statement = equity.get_statements("income_statement", period="annual", look_back=4, ensure=True)
     df = pd.DataFrame([s.statement for s in income_statement])
     print("\nIncome Statement (4 Years):")
     print(df)
@@ -23,7 +23,7 @@ def test_fundamentals():
     print("One Income Statement")
     print(df.iloc[0])
 
-    balance_sheet = ticker.get_statements("balance_sheet", period="annual", look_back=4, ensure=True)
+    balance_sheet = equity.get_statements("balance_sheet", period="annual", look_back=4, ensure=True)
     df = pd.DataFrame([s.statement for s in balance_sheet])
     print("\nBalance Sheet (4 Years):")
     print(df)
@@ -31,7 +31,7 @@ def test_fundamentals():
     print("One Balance Sheet")
     print(df.iloc[0])
     
-    cash_flow_statement = ticker.get_statements("cash_flow", period="annual", look_back=4, ensure=True)
+    cash_flow_statement = equity.get_statements("cash_flow", period="annual", look_back=4, ensure=True)
     df = pd.DataFrame([s.statement for s in cash_flow_statement])
     print("\nCash Flow (4 Years):")
     print(df)
@@ -42,11 +42,7 @@ def test_fundamentals():
 def test_market_data():
     db = DB(db_path=db_path)
 
-    ticker = db.get_ticker("AAPL", "NASDAQ", ensure=True)
-    print("Ticker info:")
-    print(ticker)
-
-    equity = ticker.get_equity(ensure=True)
+    equity = db.get_equity("AAPL", "NASDAQ", ensure=True)
     print("\nEquity info:")
     print(equity)
 

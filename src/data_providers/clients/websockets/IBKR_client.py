@@ -10,7 +10,7 @@ import time as _time
 import random as _random
 from collections import deque as _deque
 
-from data_providers.clients.base import MarketDataProvider, Provider, IssuerInfo, IssuerCapabilities, EquityInfo, EquityCapabilities
+from data_providers.clients.base import MarketDataProvider, Provider, IssuerInfo, IssuerCapabilities, ExchangeInfo, EquityInfo, EquityCapabilities, historical_prices_columns
 
 # ---------------- helpers ----------------
 def _hhmm_to_hms(hhmm: str) -> str:
@@ -103,7 +103,7 @@ def _clip_to_rth_bounds(start_dt: datetime, end_dt: datetime, rth_open: time, rt
 
 def _normalize_bars_df(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
-        return pd.DataFrame(columns=["datetime", "open", "high", "low", "close", "volume"])
+        return pd.DataFrame(columns=historical_prices_columns)
     df = df.copy()
     df["datetime"] = pd.to_datetime(df["datetime"], utc=False).dt.tz_localize(None)
     df = df.drop_duplicates(subset=["datetime"]).sort_values("datetime")
@@ -224,8 +224,6 @@ class IBKRProvider(MarketDataProvider):
     issuer_capabilities = IssuerCapabilities(
         symbol=True, exchange=True,
         currency=True, full_name=True, 
-        sec_type=True, timezone=True,
-        rth_open=True, rth_close=True,
         cik=False, lei=False
     )
 
@@ -290,8 +288,50 @@ class IBKRProvider(MarketDataProvider):
             exchange=getattr(contract, "primaryExchange", None) or None,
             currency=getattr(contract, "currency", None) or None,
             full_name=getattr(d0, "longName", None),
-            timezone=getattr(d0, "timeZoneId", None),
-            sec_type=contract.secType,
+        )
+
+    def get_exchange_information(self, symbol: str, exchange_name: str) -> ExchangeInfo:
+        """Fetch exchange information from IBKR contract details."""
+        if not self._connected:
+            raise ConnectionError("Not connected to IBKR. Call connect() first.")
+
+        candidates = self._ib.reqMatchingSymbols(symbol)
+        if not candidates:
+            raise ValueError(f"No matching symbols found for {symbol}")
+
+        contract = None
+        for c in candidates:
+            if c.contract.primaryExchange == exchange_name and c.contract.symbol == symbol:
+                contract = c.contract
+                break
+        if contract is None:
+            contract = candidates[0].contract
+
+        details = self._ib.reqContractDetails(contract)
+        if not details:
+            raise ValueError(f"No contract details found for {symbol}")
+
+        d0 = details[0]
+        trading_hours = getattr(d0, "tradingHours", "") or ""
+        liquid_hours = getattr(d0, "liquidHours", "") or ""
+
+        # prefer liquidHours for "RTH-ish" liquidity, fallback to tradingHours
+        o, c = _extract_first_session(liquid_hours) 
+        if o is None or c is None:
+            o, c = _extract_first_session(trading_hours)
+
+        timezone = getattr(d0, "timeZoneId", None)
+        currency = getattr(contract, "currency", None)
+
+        if not o or not c or not timezone or not currency:
+            raise ValueError(f"Incomplete exchange information for {symbol}: "
+                           f"timezone={timezone}, rth_open={o}, rth_close={c}, currency={currency}")
+
+        return ExchangeInfo(
+            provider=self.provider,
+            exchange_name=exchange_name,
+            timezone=timezone,
+            currency=currency,
             rth_open=o,
             rth_close=c,
         )

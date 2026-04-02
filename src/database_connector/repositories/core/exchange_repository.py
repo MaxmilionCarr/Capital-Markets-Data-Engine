@@ -3,8 +3,11 @@ from __future__ import annotations
 import sqlite3 as sql
 from dataclasses import dataclass
 from typing import Optional, List
+import logging
 from database_connector.db import Hub
 from database_connector.repositories.securities.equities_repository import EquitiesRepository
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Exchange:
@@ -49,7 +52,6 @@ class ExchangeRepository:
     def __init__(self, connection: sql.Connection, hub: Hub):
         self.connection = connection
         self.hub = hub
-        self.connection.execute("PRAGMA foreign_keys = ON")
 
     # ---------- READ ----------
 
@@ -80,7 +82,7 @@ class ExchangeRepository:
                     (exchange_name,),
                 )
         except sql.Error as e:
-            print(f"SQL error: {e}")
+            logger.exception("SQL error while reading exchange info.")
             raise
 
         row = cur.fetchone()
@@ -117,7 +119,7 @@ class ExchangeRepository:
             self.connection.commit()
             return int(cur.lastrowid)
         except sql.Error as e:
-            print(f"SQL error: {e}")
+            logger.exception("SQL error while creating exchange.")
             raise
 
     def get_or_create(
