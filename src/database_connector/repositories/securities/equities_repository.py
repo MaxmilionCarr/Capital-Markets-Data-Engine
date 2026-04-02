@@ -38,11 +38,6 @@ class Equity:
     full_name: str | None
     sector: str | None
     industry: str | None
-    dividend_yield: float | None
-    pe_ratio: float | None
-    eps: float | None
-    beta: float | None
-    market_cap: float | None
 
     _hub: Hub
 
@@ -119,11 +114,7 @@ class EquitiesRepository:
             full_name TEXT,
             sector TEXT,
             industry TEXT,
-            dividend_yield REAL,
-            pe_ratio REAL,
-            eps REAL,
-            beta REAL,
-            market_cap REAL,
+            provider_identifier TEXT,
             FOREIGN KEY (issuer_id) REFERENCES issuers(issuer_id) ON DELETE CASCADE,
             FOREIGN KEY (exchange_id) REFERENCES exchanges(exchange_id) ON DELETE CASCADE
         )
@@ -148,11 +139,6 @@ class EquitiesRepository:
             full_name=row[4],
             sector=row[5],
             industry=row[6],
-            dividend_yield=row[7],
-            pe_ratio=row[8],
-            eps=row[9],
-            beta=row[10],
-            market_cap=row[11],
             _hub=self.hub,
         )
     
@@ -160,7 +146,7 @@ class EquitiesRepository:
     def get_by_exchange_symbol(self, *, exchange_id: int, symbol: str) -> Equity | None:
         cur = self.connection.cursor()
         cur.execute(
-            "SELECT equity_id, issuer_id, exchange_id, symbol, full_name, sector, industry, dividend_yield, pe_ratio, eps, beta, market_cap "
+            "SELECT equity_id, issuer_id, exchange_id, symbol, full_name, sector, industry "
             "FROM equities WHERE exchange_id = ? AND symbol = ?",
             (exchange_id, symbol),
         )
@@ -170,7 +156,7 @@ class EquitiesRepository:
     def get_by_id(self, equity_id: int) -> Equity | None:
         cur = self.connection.cursor()
         cur.execute(
-            "SELECT equity_id, issuer_id, exchange_id, symbol, full_name, sector, industry, dividend_yield, pe_ratio, eps, beta, market_cap "
+            "SELECT equity_id, issuer_id, exchange_id, symbol, full_name, sector, industry "
             "FROM equities WHERE equity_id = ?",
             (equity_id,),
         )
@@ -180,7 +166,7 @@ class EquitiesRepository:
     def get_by_issuer(self, issuer_id: int) -> List[Equity]:
         cur = self.connection.cursor()
         cur.execute(
-            "SELECT equity_id, issuer_id, exchange_id, symbol, full_name, sector, industry, dividend_yield, pe_ratio, eps, beta, market_cap "
+            "SELECT equity_id, issuer_id, exchange_id, symbol, full_name, sector, industry "
             "FROM equities WHERE issuer_id = ?",
             (issuer_id,),
         )
@@ -189,7 +175,7 @@ class EquitiesRepository:
     def get_by_exchange(self, exchange_id: int) -> List[Equity]:
         cur = self.connection.cursor()
         cur.execute(
-            "SELECT equity_id, issuer_id, exchange_id, symbol, full_name, sector, industry, dividend_yield, pe_ratio, eps, beta, market_cap "
+            "SELECT equity_id, issuer_id, exchange_id, symbol, full_name, sector, industry "
             "FROM equities WHERE exchange_id = ?",
             (exchange_id,),
         )
@@ -206,25 +192,14 @@ class EquitiesRepository:
         full_name: str | None = None,
         sector: str | None = None,
         industry: str | None = None,
-        dividend_yield: float | None = None,
-        pe_ratio: float | None = None,
-        eps: float | None = None,
-        beta: float | None = None,
-        market_cap: float | None = None,
         provider_identifier: str | None = None,
     ) -> int:
         if provider_identifier is None:
             provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
 
-        dividend_yield = None
-        pe_ratio = None
-        eps = None
-        beta = None
-        market_cap = None
-
         cur = self.hub.db_service.execute(
-            "INSERT INTO equities (issuer_id, exchange_id, symbol, full_name, sector, industry, dividend_yield, pe_ratio, eps, beta, market_cap, provider_identifier) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO equities (issuer_id, exchange_id, symbol, full_name, sector, industry, provider_identifier) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 issuer_id,
                 exchange_id,
@@ -232,11 +207,6 @@ class EquitiesRepository:
                 full_name,
                 sector,
                 industry,
-                dividend_yield,
-                pe_ratio,
-                eps,
-                beta,
-                market_cap,
                 provider_identifier,
             ),
         )
@@ -252,11 +222,6 @@ class EquitiesRepository:
         full_name: str | None = None,
         sector: str | None = None,
         industry: str | None = None,
-        dividend_yield: float | None = None,
-        pe_ratio: float | None = None,
-        eps: float | None = None,
-        beta: float | None = None,
-        market_cap: float | None = None,
         provider_identifier: str | None = None,
     ) -> int:
         """
@@ -265,12 +230,6 @@ class EquitiesRepository:
         """
         if provider_identifier is None:
             provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
-
-        dividend_yield = None
-        pe_ratio = None
-        eps = None
-        beta = None
-        market_cap = None
 
         upsert_sql = self.hub.db_service.build_upsert(
             table="equities",
@@ -281,11 +240,6 @@ class EquitiesRepository:
                 "full_name",
                 "sector",
                 "industry",
-                "dividend_yield",
-                "pe_ratio",
-                "eps",
-                "beta",
-                "market_cap",
                 "provider_identifier",
             ),
             conflict_columns=("exchange_id", "symbol"),
@@ -294,22 +248,12 @@ class EquitiesRepository:
                 "full_name",
                 "sector",
                 "industry",
-                "dividend_yield",
-                "pe_ratio",
-                "eps",
-                "beta",
-                "market_cap",
                 "provider_identifier",
             ),
             coalesce_update_columns=(
                 "full_name",
                 "sector",
                 "industry",
-                "dividend_yield",
-                "pe_ratio",
-                "eps",
-                "beta",
-                "market_cap",
             ),
         )
 
@@ -322,11 +266,6 @@ class EquitiesRepository:
                 full_name,
                 sector,
                 industry,
-                dividend_yield,
-                pe_ratio,
-                eps,
-                beta,
-                market_cap,
                 provider_identifier,
             ),
         )
@@ -341,16 +280,31 @@ class EquitiesRepository:
 
     # ---------- ENSURE (high-level convenience) ----------
 
-    # NEED TO FIX THIS TODO
     def get_or_create_ensure(self, *, symbol: str, exchange_name: str) -> Equity | None:
+        """
+        Get or create an equity, minimizing API calls through intelligent caching.
+        
+        Flow:
+        1. Check if equity exists in DB (by exchange + symbol) → return immediately
+        2. Check if exchange exists in DB → fetch from API only if missing
+        3. Check if issuer exists in DB → fetch from API only if missing
+        4. Create or update equity in DB
+        """
         exchange_name = exchange_name.strip()
         provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
 
-        # Step 1: Check if exchange exists in database
+        # Step 0.5: Get exchange (may be None)
         ex = self.hub.exchange_repo.get_info(exchange_name=exchange_name)
 
+        # Step 1: Check if equity already exists in database (by exchange_name + symbol)
+        # This is the PRIMARY CACHE CHECK - avoids all API calls if equity is already known
+        if ex:
+            existing_equity = self.get_by_exchange_symbol(exchange_id=ex.exchange_id, symbol=symbol)
+            if existing_equity:
+                return existing_equity
+
+        # Step 2: Exchange doesn't exist, fetch from provider and create it
         if not ex:
-            # Step 2: Exchange doesn't exist, fetch from IBKR and create it
             exchange_enriched = self.hub.exchange_service.fetch_exchange_enriched(
                 symbol=symbol,
                 exchange_name=exchange_name
@@ -370,47 +324,35 @@ class EquitiesRepository:
             if not ex:
                 return None
 
-        # Step 3: Fetch issuer information (now issuer-specific only, not exchange fields)
+        # Step 3: Fetch issuer information from provider
         issuer_enriched = self.hub.basic_info_service.fetch_issuer_enriched(
             symbol=symbol,
             exchange_name=exchange_name
         )
 
-        # Step 4: Fetch equity enrichment
-        equity = self.hub.basic_info_service.fetch_equity_enriched(
+        # Step 4: Fetch equity enrichment from provider
+        equity_enriched = self.hub.basic_info_service.fetch_equity_enriched(
             symbol=symbol,
             exchange_name=exchange_name,
             currency=ex.currency
         )
 
-        # Step 5: Resolve or create issuer
-        issuer = self.hub.issuer_repo.get_info(cik=issuer_enriched.cik, lei=issuer_enriched.lei)
-
-        if issuer:
-            issuer_id = issuer.issuer_id
-            self.hub.issuer_repo.upsert(
-                issuer_id,
-                full_name=issuer_enriched.full_name,
-                cik=issuer_enriched.cik,
-                lei=issuer_enriched.lei,
-                provider_identifier=provider_identifier,
-            )
-        else:
-            issuer_id = self.hub.issuer_repo.get_or_create(
-                full_name=issuer_enriched.full_name,
-                cik=issuer_enriched.cik,
-                lei=issuer_enriched.lei,
-                provider_identifier=provider_identifier,
-            )
+        # Step 5: Resolve or create issuer (using get_or_create which checks first)
+        issuer_id = self.hub.issuer_repo.get_or_create(
+            full_name=issuer_enriched.full_name,
+            cik=issuer_enriched.cik,
+            lei=issuer_enriched.lei,
+            provider_identifier=provider_identifier,
+        )
 
         # Step 6: Create or update equity
         equity_id = self.upsert_by_exchange_symbol(
             issuer_id=issuer_id,
             exchange_id=ex.exchange_id,
-            symbol=equity.symbol,
-            full_name=equity.full_name,
-            sector=equity.sector,
-            industry=equity.industry,
+            symbol=equity_enriched.symbol,
+            full_name=equity_enriched.full_name,
+            sector=equity_enriched.sector,
+            industry=equity_enriched.industry,
             provider_identifier=provider_identifier,
         )
 

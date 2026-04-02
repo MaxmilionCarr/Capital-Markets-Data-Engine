@@ -63,13 +63,9 @@ class EquityInfo:
     full_name: Optional[str] = None
     sector: Optional[str] = None
     industry: Optional[str] = None
-    dividend_yield: Optional[float] = None
-    pe_ratio: Optional[float] = None
-    eps: Optional[float] = None
-    beta: Optional[float] = None
-    market_cap: Optional[float] = None
     cik: Optional[str] = None
     lei: Optional[str] = None
+    dividend_yield: Optional[float] = None
 
 
 historical_prices_columns = ["datetime", "open", "high", "low", "close", "volume"]
@@ -105,11 +101,6 @@ class EquityCapabilities:
     full_name: bool = False
     sector: bool = False
     industry: bool = False
-    dividend_yield: bool = False
-    pe_ratio: bool = False
-    eps: bool = False
-    beta: bool = False
-    market_cap: bool = False
     cik: bool = False
     lei: bool = False
 
@@ -225,11 +216,6 @@ class EquityBuilder(Builder):
         FieldSpec(name="full_name", provider_priority=[Provider.IBKR, Provider.FMP], required=True),
         FieldSpec(name="sector", provider_priority=[Provider.FMP], required=True),
         FieldSpec(name="industry", provider_priority=[Provider.FMP, Provider.IBKR], required=True),
-        FieldSpec(name="dividend_yield", provider_priority=[Provider.FMP, Provider.IBKR]),
-        FieldSpec(name="pe_ratio", provider_priority=[Provider.FMP, Provider.IBKR]),
-        FieldSpec(name="eps", provider_priority=[Provider.FMP, Provider.IBKR]),
-        FieldSpec(name="beta", provider_priority=[Provider.FMP, Provider.IBKR]),
-        FieldSpec(name="market_cap", provider_priority=[Provider.FMP, Provider.IBKR]),
         FieldSpec(name="cik", provider_priority=[Provider.FMP]),
         FieldSpec(name="lei", provider_priority=[Provider.FMP]),
     ]
@@ -239,11 +225,6 @@ class EquityBuilder(Builder):
         self.full_name = None
         self.sector = None
         self.industry = None
-        self.dividend_yield = None
-        self.pe_ratio = None
-        self.eps = None
-        self.beta = None
-        self.market_cap = None
         self.cik = None
         self.lei = None
 

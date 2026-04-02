@@ -38,9 +38,6 @@ class FMPProvider(FundamentalDataProvider, MarketDataProvider):
     equity_capabilities = EquityCapabilities(
         sector=True,
         industry=True,
-        dividend_yield=True,
-        beta=True,
-        market_cap=True,
     )
     # NEED TO CONFIGURE PROVIDER CAPABILITIES
 
@@ -126,10 +123,8 @@ class FMPProvider(FundamentalDataProvider, MarketDataProvider):
             full_name=entry.get("companyName"),
             sector=entry.get("sector"),
             industry=entry.get("industry"),
-            dividend_yield=entry.get("lastDividend"),
-            beta=entry.get("beta"),
-            market_cap=entry.get("marketCap"),
             cik=entry.get("cik"),
+            dividend_yield=entry.get("dividendYield"),
         )
 
     def get_quote_information(self, symbol: str) -> dict[str, Any]:
@@ -228,22 +223,6 @@ class FMPProvider(FundamentalDataProvider, MarketDataProvider):
                 profile_entry.get("dividendYield"),
                 profile_entry.get("lastDividend"),
                 quote_entry.get("dividendYield"),
-            ),
-            pe_ratio=_first_value(
-                quote_entry.get("pe"),
-                quote_entry.get("peRatio"),
-                quote_entry.get("priceEarningsRatio"),
-            ),
-            eps=_first_value(
-                quote_entry.get("eps"),
-                quote_entry.get("epsTTM"),
-                quote_entry.get("dilutedEPS"),
-            ),
-            beta=_first_value(profile_entry.get("beta"), quote_entry.get("beta")),
-            market_cap=_first_value(
-                quote_entry.get("marketCap"),
-                quote_entry.get("mktCap"),
-                profile_entry.get("marketCap"),
             ),
             cik=profile_entry.get("cik"),
             lei=profile_entry.get("lei"),

@@ -228,9 +228,7 @@ class IBKRProvider(MarketDataProvider):
     )
 
     equity_capabilities = EquityCapabilities(
-        sector=True, industry=True,
-        dividend_yield=False, pe_ratio=False,
-        eps=False, beta=False, market_cap=False
+        sector=True, industry=True
     )
 
     def __init__(self, config: IBKRConfig = IBKRConfig()):
@@ -363,11 +361,6 @@ class IBKRProvider(MarketDataProvider):
             full_name=getattr(d0, "longName", None),
             industry=getattr(d0, "industry", None),
             sector=getattr(d0, "category", None),
-            dividend_yield=getattr(d0, "dividendYield", None),
-            pe_ratio=getattr(d0, "peRatio", None),
-            eps=getattr(d0, "eps", None),
-            beta=getattr(d0, "beta", None),
-            market_cap=getattr(d0, "marketCap", None),
         )
 
     # ---- Trading hours (per-contract) ----

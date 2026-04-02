@@ -48,11 +48,6 @@ class SchemaService:
                         full_name TEXT,
                         sector TEXT,
                         industry TEXT,
-                        dividend_yield REAL,
-                        pe_ratio REAL,
-                        eps REAL,
-                        beta REAL,
-                        market_cap REAL,
                         provider_identifier TEXT NOT NULL,
 
                         FOREIGN KEY (issuer_id) REFERENCES issuers(issuer_id) ON DELETE CASCADE,

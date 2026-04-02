@@ -1,5 +1,5 @@
 [project]
-name = "financial-datahub"
+name = "market-ingestion"
 version = "0.1.0"
 description = "Reusable datahub package for financial data ingestion and storage"
 readme = "README.md"
