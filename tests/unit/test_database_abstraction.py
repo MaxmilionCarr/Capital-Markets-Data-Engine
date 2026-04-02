@@ -118,6 +118,58 @@ class MockBasicIBKR:
         )
 
 
+class MockBasicNoIds:
+    """Mock basic-info provider with no cik/lei coverage."""
+    name = "mock_basic_no_ids"
+
+    def fetch_issuer(self, symbol: str, exchange_name: str | None = None) -> IssuerInfo:
+        return IssuerInfo(
+            provider=Provider.IBKR,
+            symbol=symbol,
+            exchange=exchange_name,
+            currency="USD",
+            full_name="Global Mining Corp",
+            cik=None,
+            lei=None,
+        )
+
+    def fetch_equity(self, symbol: str, exchange_name: str | None = None, currency: str | None = None) -> EquityInfo:
+        return EquityInfo(
+            provider=Provider.IBKR,
+            symbol=symbol,
+            full_name=f"{symbol} ({exchange_name})",
+            sector="Materials",
+            industry="Metals & Mining",
+            cik=None,
+            lei=None,
+        )
+
+    def fetch_equity_prices(
+        self,
+        symbol: str,
+        exchange_name: str | None = None,
+        currency: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        bar_size: str = "1 day",
+        *,
+        rth_open=None,
+        rth_close=None,
+    ) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "datetime": datetime(2024, 1, 2, 0, 0, 0),
+                    "open": 100.0,
+                    "high": 110.0,
+                    "low": 95.0,
+                    "close": 108.0,
+                    "volume": 1_000_000,
+                }
+            ]
+        )
+
+
 class MockPricingIBKR:
     """Mock pricing provider that returns a single deterministic daily bar."""
     name = "mock_pricing_ibkr"
@@ -173,6 +225,16 @@ class MockFundamentalFMP:
 def _build_db(path: str) -> DB:
     cfg = DataHubConfig(
         basic_info_services=(MockBasicFMP(), MockBasicIBKR()),
+        exchange_services=(MockExchangeIBKR(),),
+        pricing_services=(MockPricingIBKR(),),
+        fundamental_services=(MockFundamentalFMP(),),
+    )
+    return DB(db_path=path, config=cfg)
+
+
+def _build_db_without_ids(path: str) -> DB:
+    cfg = DataHubConfig(
+        basic_info_services=(MockBasicNoIds(),),
         exchange_services=(MockExchangeIBKR(),),
         pricing_services=(MockPricingIBKR(),),
         fundamental_services=(MockFundamentalFMP(),),
@@ -243,6 +305,32 @@ def test_sqlite_db_flow_with_mock_providers() -> None:
         assert statements is not None
         assert len(statements) == 1
         assert statements[0].statement["statement_type"] == "income_statement"
+    finally:
+        if db is not None:
+            db.close()
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def test_symbol_fallback_links_issuer_when_cik_lei_missing() -> None:
+    fd, temp_path = tempfile.mkstemp(prefix="unit_symbol_fallback_", suffix=".db")
+    os.close(fd)
+    db = None
+
+    try:
+        DataBase(temp_path).create_db()
+        db = _build_db_without_ids(temp_path)
+
+        equity_asx = db.get_equity("BHP", "ASX", ensure=True)
+        equity_nyse = db.get_equity("BHP", "NYSE", ensure=True)
+
+        assert equity_asx is not None
+        assert equity_nyse is not None
+        assert equity_asx.issuer_id == equity_nyse.issuer_id
+
+        cur = db._connection.cursor()
+        cur.execute("SELECT COUNT(*) FROM issuers")
+        assert cur.fetchone()[0] == 1
     finally:
         if db is not None:
             db.close()

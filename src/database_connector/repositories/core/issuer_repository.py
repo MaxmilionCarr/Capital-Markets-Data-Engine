@@ -27,6 +27,7 @@ SECURITY_TYPES = {
 @dataclass
 class Issuer:
     issuer_id: int
+    main_symbol: str
     full_name: str | None
     cik: str | None
     lei: str | None
@@ -87,53 +88,82 @@ class IssuerRepository:
         self,
         *,
         issuer_id: int | None = None,
+        main_symbol: str | None = None,
         cik: str | None = None,
         lei: str | None = None,
     ) -> Issuer:
-        if issuer_id is None and cik is None and lei is None:
-            raise ValueError("Provide issuer_id or cik or lei")
+        if issuer_id is None and main_symbol is None and cik is None and lei is None:
+            raise ValueError("Provide issuer_id or main_symbol or cik or lei")
 
         cur = self.connection.cursor()
 
         if issuer_id is not None:
             cur.execute(
-                "SELECT issuer_id, full_name, cik, lei FROM issuers WHERE issuer_id = ?",
+                "SELECT issuer_id, main_symbol, full_name, cik, lei FROM issuers WHERE issuer_id = ?",
                 (issuer_id,),
+            )
+        elif main_symbol is not None:
+            cur.execute(
+                "SELECT issuer_id, main_symbol, full_name, cik, lei FROM issuers WHERE main_symbol = ?",
+                (main_symbol,),
             )
         elif cik is not None:
             cur.execute(
-                "SELECT issuer_id, full_name, cik, lei FROM issuers WHERE cik = ?",
+                "SELECT issuer_id, main_symbol, full_name, cik, lei FROM issuers WHERE cik = ?",
                 (cik,),
             )
         else:
             cur.execute(
-                "SELECT issuer_id, full_name, cik, lei FROM issuers WHERE lei = ?",
+                "SELECT issuer_id, main_symbol, full_name, cik, lei FROM issuers WHERE lei = ?",
                 (lei,),
             )
 
         row = cur.fetchone()
         return None if not row else Issuer(
             issuer_id=row[0],
-            full_name=row[1],
-            cik=row[2],
-            lei=row[3],
+            main_symbol=row[1],
+            full_name=row[2],
+            cik=row[3],
+            lei=row[4],
             _hub=self.hub,
         )
 
     def get_all(self) -> List[Issuer]:
         cur = self.connection.cursor()
-        cur.execute("SELECT issuer_id, full_name, cik, lei FROM issuers")
+        cur.execute("SELECT issuer_id, main_symbol, full_name, cik, lei FROM issuers")
         rows = cur.fetchall()
         return [
-            Issuer(issuer_id=r[0], full_name=r[1], cik=r[2], lei=r[3], _hub=self.hub)
+            Issuer(issuer_id=r[0], main_symbol=r[1], full_name=r[2], cik=r[3], lei=r[4], _hub=self.hub)
             for r in rows
         ]
+
+    def get_by_equity_symbol(self, symbol: str) -> Issuer | None:
+        """Find issuer by an existing equity symbol across any exchange."""
+        cur = self.connection.cursor()
+        cur.execute(
+            "SELECT i.issuer_id, i.main_symbol, i.full_name, i.cik, i.lei "
+            "FROM issuers i "
+            "JOIN equities e ON e.issuer_id = i.issuer_id "
+            "WHERE e.symbol = ? "
+            "ORDER BY i.issuer_id ASC LIMIT 1",
+            (symbol,),
+        )
+        row = cur.fetchone()
+        return None if not row else Issuer(
+            issuer_id=row[0],
+            main_symbol=row[1],
+            full_name=row[2],
+            cik=row[3],
+            lei=row[4],
+            _hub=self.hub,
+        )
 
     # ---------- CREATE / UPSERT ----------
 
     def create(
         self,
         *,
+        main_symbol: str,
         full_name: str | None = None,
         cik: str | None = None,
         lei: str | None = None,
@@ -144,8 +174,8 @@ class IssuerRepository:
 
         cur = self.connection.cursor()
         cur.execute(
-            "INSERT INTO issuers (full_name, cik, lei, provider_identifier) VALUES (?, ?, ?, ?)",
-            (full_name, cik, lei, provider_identifier),
+            "INSERT INTO issuers (main_symbol, full_name, cik, lei, provider_identifier) VALUES (?, ?, ?, ?, ?)",
+            (main_symbol, full_name, cik, lei, provider_identifier),
         )
         self.connection.commit()
         return int(cur.lastrowid)
@@ -153,6 +183,7 @@ class IssuerRepository:
     def get_or_create(
         self,
         *,
+        main_symbol: str | None = None,
         full_name: str | None = None,
         cik: str | None = None,
         lei: str | None = None,
@@ -175,6 +206,20 @@ class IssuerRepository:
             if existing:
                 self.upsert(
                     existing.issuer_id,
+                    main_symbol=main_symbol,
+                    full_name=full_name,
+                    cik=cik,
+                    lei=lei,
+                    provider_identifier=provider_identifier,
+                )
+                return existing.issuer_id
+
+        if main_symbol:
+            existing = self.get_info(main_symbol=main_symbol)
+            if existing:
+                self.upsert(
+                    existing.issuer_id,
+                    main_symbol=main_symbol,
                     full_name=full_name,
                     cik=cik,
                     lei=lei,
@@ -186,13 +231,14 @@ class IssuerRepository:
         if full_name:
             cur = self.connection.cursor()
             cur.execute(
-                "SELECT issuer_id, full_name, cik, lei FROM issuers WHERE full_name = ?",
+                "SELECT issuer_id, main_symbol, full_name, cik, lei FROM issuers WHERE full_name = ?",
                 (full_name,),
             )
             row = cur.fetchone()
             if row:
                 self.upsert(
                     int(row[0]),
+                    main_symbol=main_symbol,
                     full_name=full_name,
                     cik=cik,
                     lei=lei,
@@ -200,7 +246,11 @@ class IssuerRepository:
                 )
                 return int(row[0])
 
+        if not main_symbol:
+            raise ValueError("main_symbol is required to create a new issuer")
+
         return self.create(
+            main_symbol=main_symbol,
             full_name=full_name,
             cik=cik,
             lei=lei,
@@ -211,6 +261,7 @@ class IssuerRepository:
         self,
         issuer_id: int,
         *,
+        main_symbol: str | None = None,
         full_name: str | None = None,
         cik: str | None = None,
         lei: str | None = None,
@@ -219,12 +270,15 @@ class IssuerRepository:
         if provider_identifier is None:
             provider_identifier = self.hub.data_hub.provider_identifiers["basic_info"]
 
-        if not (full_name or cik or lei or provider_identifier):
+        if not (main_symbol or full_name or cik or lei or provider_identifier):
             return 0
 
         fields: list[str] = []
         values: list[object] = []
 
+        if main_symbol is not None:
+            fields.append("main_symbol = ?")
+            values.append(main_symbol)
         if full_name is not None:
             fields.append("full_name = ?")
             values.append(full_name)

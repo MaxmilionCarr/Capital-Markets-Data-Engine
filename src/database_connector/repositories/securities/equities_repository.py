@@ -337,13 +337,33 @@ class EquitiesRepository:
             currency=ex.currency
         )
 
-        # Step 5: Resolve or create issuer (using get_or_create which checks first)
-        issuer_id = self.hub.issuer_repo.get_or_create(
-            full_name=issuer_enriched.full_name,
-            cik=issuer_enriched.cik,
-            lei=issuer_enriched.lei,
-            provider_identifier=provider_identifier,
-        )
+        # Step 5: Resolve or create issuer.
+        # If cik/lei are unavailable (common for non-US instruments),
+        # use existing symbol linkage as the fallback identity path.
+        if issuer_enriched.cik is None and issuer_enriched.lei is None:
+            existing_issuer = self.hub.issuer_repo.get_info(main_symbol=symbol)
+            if existing_issuer is not None:
+                issuer_id = existing_issuer.issuer_id
+                self.hub.issuer_repo.upsert(
+                    issuer_id,
+                    main_symbol=symbol,
+                    full_name=issuer_enriched.full_name,
+                    provider_identifier=provider_identifier,
+                )
+            else:
+                issuer_id = self.hub.issuer_repo.get_or_create(
+                    main_symbol=symbol,
+                    full_name=issuer_enriched.full_name,
+                    provider_identifier=provider_identifier,
+                )
+        else:
+            issuer_id = self.hub.issuer_repo.get_or_create(
+                main_symbol=symbol,
+                full_name=issuer_enriched.full_name,
+                cik=issuer_enriched.cik,
+                lei=issuer_enriched.lei,
+                provider_identifier=provider_identifier,
+            )
 
         # Step 6: Create or update equity
         equity_id = self.upsert_by_exchange_symbol(

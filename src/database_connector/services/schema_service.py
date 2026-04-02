@@ -30,12 +30,14 @@ class SchemaService:
 
         cur.execute('''CREATE TABLE IF NOT EXISTS issuers (
                         issuer_id INTEGER PRIMARY KEY,
+                        main_symbol TEXT NOT NULL UNIQUE,
                         full_name TEXT,
                         cik TEXT UNIQUE,
                         lei TEXT UNIQUE,
                         provider_identifier TEXT NOT NULL
                     );''')
 
+        cur.execute('''CREATE INDEX IF NOT EXISTS idx_issuers_main_symbol ON issuers(main_symbol);''')
         cur.execute('''CREATE INDEX IF NOT EXISTS idx_issuers_cik ON issuers(cik);''')
         cur.execute('''CREATE INDEX IF NOT EXISTS idx_issuers_lei ON issuers(lei);''')
 

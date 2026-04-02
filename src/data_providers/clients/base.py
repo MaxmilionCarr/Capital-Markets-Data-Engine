@@ -107,8 +107,6 @@ class EquityCapabilities:
 
 # TODO: This will be the orchestration layer for all different providers, will handle merging and filling instead of doing it in the service layer. (Makes for better abstraction)
 class IssuerBuilder(Builder):
-    and_or_required_fields = [["cik", "lei"]]
-
     PRIORITY_MAPPING = [
         FieldSpec(name="symbol", provider_priority=[Provider.FMP, Provider.IBKR], required=True),
         FieldSpec(name="exchange", provider_priority=[Provider.FMP, Provider.IBKR], required=True),
@@ -146,9 +144,6 @@ class IssuerBuilder(Builder):
         for field_spec in self.PRIORITY_MAPPING:
             value = getattr(self, field_spec.name)
             if field_spec.required and value is None:
-                return False
-        for group in self.and_or_required_fields:
-            if not any(getattr(self, field) is not None for field in group):
                 return False
         return True
 
@@ -209,12 +204,10 @@ class ExchangeBuilder(Builder):
 
 # PROVIDE PRIORITY MAPPING FOR THIS AS WELL and merge function just like issuer
 class EquityBuilder(Builder):
-    and_or_required_fields = [["cik", "lei"]]
-
     PRIORITY_MAPPING = [
         FieldSpec(name="symbol", provider_priority=[Provider.FMP, Provider.IBKR], required=True),
         FieldSpec(name="full_name", provider_priority=[Provider.IBKR, Provider.FMP], required=True),
-        FieldSpec(name="sector", provider_priority=[Provider.FMP], required=True),
+        FieldSpec(name="sector", provider_priority=[Provider.FMP, Provider.IBKR], required=True),
         FieldSpec(name="industry", provider_priority=[Provider.FMP, Provider.IBKR], required=True),
         FieldSpec(name="cik", provider_priority=[Provider.FMP]),
         FieldSpec(name="lei", provider_priority=[Provider.FMP]),
@@ -248,9 +241,6 @@ class EquityBuilder(Builder):
         for field_spec in self.PRIORITY_MAPPING:
             value = getattr(self, field_spec.name)
             if field_spec.required and value is None:
-                return False
-        for group in self.and_or_required_fields:
-            if not any(getattr(self, field) is not None for field in group):
                 return False
         return True
 
