@@ -142,6 +142,8 @@ class DataHubConfig:
 
 
 # ---- DataHub: DB-free core ----
+
+# Enrichment needs to be returned as an accessible object
 class DataHub:
     def __init__(self, config: DataHubConfig):
         self.config = config
