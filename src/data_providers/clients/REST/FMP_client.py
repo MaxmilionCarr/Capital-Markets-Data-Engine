@@ -74,6 +74,7 @@ class FMPProvider(FundamentalDataProvider, MarketDataProvider):
         )
     
     # TODO: Currently assuming exchange is given correctly each time, will need to change if i do this globally
+    # TODO: ensure build is to equity class outlined in base.py
     def get_equity_information(self, symbol: str, exchange: str) -> EquityInfo:
         '''extension = f"search-exchange-variants?symbol={symbol}&apikey={self.api_key}"''' # Not offered need to upgrade
         extension = f"profile?symbol={symbol}&apikey={self.api_key}"
